@@ -198,8 +198,23 @@ function warnOnce($: EngineInterface, key: string, text: string): void {
   $.ui.toast(text, { timeoutMs: 8000 })
 }
 
+/** The route line, drawn dim at the end of the hint line under the prompt. */
+let hint: string | undefined
+
+/**
+ * Shows the route without Claude Code's status-line marker (a ⚠ that reads as
+ * a warning): the text joins the prompt's hint line as its tail, prefixed ↳.
+ * The terminal draws that tail; elsewhere `announce: "answer"` shows the route.
+ */
+function showStatus($: EngineInterface, text: string | undefined): void {
+  const next = text === undefined ? undefined : `↳ ${text}`
+  if (next === hint) return
+  hint = next
+  $.ui.invalidate("ui.render")
+}
+
 function announce($: EngineInterface, d: Decision): void {
-  if (config.announce === "status" || config.announce === "both") $.ui.status(statusLine(d))
+  if (config.announce === "status" || config.announce === "both") showStatus($, statusLine(d))
 }
 
 async function appendLog($: EngineInterface, line: string, ts: string): Promise<void> {
@@ -389,13 +404,13 @@ async function registerCommand($: EngineInterface): Promise<void> {
   } catch {
     // Without the command the router still routes.
   }
-  if (!config.enabled) $.ui.status(undefined)
-  else if (!config.accountId || !config.apiToken) $.ui.status("Clef: not configured")
+  if (!config.enabled) showStatus($, undefined)
+  else if (!config.accountId || !config.apiToken) showStatus($, "Clef: not configured")
   else {
     // Always replace what an earlier load showed (a stale "not configured"
     // survives a reload otherwise): the last route if there is one.
     const last = state.history.at(-1)?.decision
-    $.ui.status((last && statusLine(last)) ?? `Clef ready · ${config.decisionModel}`)
+    showStatus($, (last && statusLine(last)) ?? `Clef ready · ${config.decisionModel}`)
   }
 }
 
@@ -518,23 +533,23 @@ async function runCommand($: EngineInterface, args: string): Promise<string> {
       delete state.nativeEffort
       delete state.effortBaseline
       await save($)
-      $.ui.status(config.enabled ? `Clef auto · ${config.decisionModel}` : undefined)
+      showStatus($, config.enabled ? `Clef auto · ${config.decisionModel}` : undefined)
       return config.enabled ? "Routing is automatic again." : "Routing is disabled in the plugin config (enabled = false)."
     case "on":
       state.mode = "auto"
       await save($)
-      $.ui.status(`Clef on · ${config.decisionModel}`)
+      showStatus($, `Clef on · ${config.decisionModel}`)
       return state.pin ? `Routing on, still pinned to ${targetText(state.pin)} (/clef auto to unpin).` : "Routing on."
     case "off":
       state.mode = "off"
       await save($)
-      $.ui.status("Clef off")
+      showStatus($, "Clef off")
       return "Routing off for this session: Claude Code's own model and effort apply. /clef on resumes."
     case "pin":
       state.pin = cmd.target
       state.mode = "auto"
       await save($)
-      $.ui.status(`Pinned → ${targetText(cmd.target)}`)
+      showStatus($, `Pinned → ${targetText(cmd.target)}`)
       return `Pinned to ${targetText(cmd.target)} for this session. /clef auto unpins.`
   }
 }
@@ -554,11 +569,18 @@ function routed<E extends { model: string; effort?: unknown }>(e: E, route: Rout
 export const register: Register = (on, pluginOptions) => {
   options = pluginOptions
   state = freshState()
+  hint = undefined
   apiBase = undefined
   loaded = false
   logFile = undefined
   logLines = []
   runs.clear()
+
+  on("ui.render", { component: "PromptHint" }, async ($, e, next) => {
+    if (hint === undefined) return next(e)
+    const tail = e.props.tail ? `${e.props.tail} · ${hint}` : `  ${hint}`
+    return next({ ...e, props: { ...e.props, tail } })
+  })
 
   on("session.start", async ($, e, next) => {
     await load($)

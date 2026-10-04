@@ -15,7 +15,7 @@ An invalid value never stops the mod. It falls back to the default, and `/clef` 
 | `cloudflare_api_token` | (none) | A Workers AI API token. **Sensitive**: masked on entry, stored in your system's secure credential store, never in `settings.json`. Falls back to `$CLOUDFLARE_API_TOKEN`. |
 | `decision_model` | `clef-flash` | `clef-flash` ($0.09 per million input tokens; ~40 ms model time, ~0.3–0.5 s end to end) or `clef` ($0.24 per million; ~210 ms model time). |
 | `profiles` | `haiku, sonnet:low, sonnet:medium, opus:high, opus:xhigh` | What each difficulty level runs on, lowest first: trivial, simple, standard, hard, deep. Each entry is `model[:effort]`, where model is an alias (`haiku`, `sonnet`, `opus`, `fable`) or a full model ID. With no effort, the turn keeps the effort Claude Code would send (Haiku takes none). |
-| `announce` | `status` | `status`: a line under the prompt. `answer`: a line under each answer. `both`, or `off`. |
+| `announce` | `status` | `status`: dimmed at the end of the hint line under the prompt (terminal only). `answer`: a line under each answer. `both`, or `off`. |
 | `enabled` | `true` | Off: the mod stays loaded but leaves every request alone. |
 | `log_prompts` | `false` | Write each prompt's text into the local log. Off: only a hash and the length. |
 

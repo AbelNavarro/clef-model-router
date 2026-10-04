@@ -49,7 +49,12 @@ function world(on: On, opts: { clef?: () => unknown; sessionModel?: () => string
   on("session.id", () => ({ value: "sess-1" }))
   on("session.usage", () => ({ value: { startedAt: T0, context: { tokens: 30_000, window: 1_000_000, percent: 3 }, rateLimits: [] } }))
   on("command.register", () => ({ value: { command: "clef" } }))
-  on("ui.status", ($, e) => (w.statuses.push(e.text), { value: undefined }))
+  // What the mod adds to the hint line under the prompt (via ui.render).
+  on("ui.render", ($, e) => {
+    const tail = (e.props as { tail?: string }).tail
+    w.statuses.push(tail === undefined ? undefined : tail.replace(/^\s*↳ /, ""))
+    return { type: "Text", props: {}, children: ["hint"] }
+  })
   on("ui.toast", ($, e) => (w.toasts.push(e.text), { value: undefined }))
   on("fs.read", ($, e) => (w.files.has(e.path) ? { value: w.files.get(e.path)! } : { deny: "ENOENT" }))
   on("fs.write", ($, e) => (w.files.set(e.path, e.text), { value: undefined }))
@@ -85,6 +90,12 @@ async function step($: Engine, turnId: string, index: number, model = "claude-op
   return r.value
 }
 
+/** Draws the hint line once and returns what the mod appended (without ↳). */
+async function shown($: Engine, w: World): Promise<string | undefined> {
+  await $.ui.render({ component: "PromptHint", surface: "terminal", props: { isDraft: false, isWorking: false, hint: "? for shortcuts" } } as never)
+  return w.statuses.at(-1)
+}
+
 async function start($: Engine) {
   await $.session.start({ surface: "terminal", isInteractive: true, cwd: "/work" } as never)
 }
@@ -99,7 +110,7 @@ test("one Clef call per turn; every main-loop request of the turn gets the route
   expect(w.fetches[0]!.auth).toBe("Bearer tok-123456")
   expect(JSON.parse(w.fetches[0]!.body).state).toBe("Debug why these tests intermittently deadlock only in parallel")
   expect(w.steps.map((s) => `${s.model}:${String(s.effort)}`)).toEqual(["claude-opus-5-5:high", "claude-opus-5-5:high", "claude-opus-5-5:high"])
-  expect(w.statuses.at(-1)).toBe("Clef → Opus · high · 82%")
+  expect(await shown($, w)).toBe("Clef → Opus · high · 82%")
 })
 
 test("subagent requests keep their own model", { options: CREDS }, async ($, on) => {
@@ -172,7 +183,7 @@ test("when Clef is unreachable the turn runs on the fallback profile", { options
   await step($, "t1", 0)
   expect(w.steps[0]!.model).toBe("claude-sonnet-5-5")
   expect(w.steps[0]!.effort).toBe("medium")
-  expect(w.statuses.at(-1)).toBe("Clef ✕ network → Sonnet · medium")
+  expect(await shown($, w)).toBe("Clef ✕ network → Sonnet · medium")
 })
 
 test("a Clef timeout falls back without waiting for the answer", { options: CREDS }, async ($, on) => {
@@ -189,13 +200,13 @@ test("a Clef timeout falls back without waiting for the answer", { options: CRED
   await started
   await step($, "t1", 0)
   expect(w.steps[0]!.model).toBe("claude-sonnet-5-5")
-  expect(w.statuses.at(-1)).toBe("Clef ✕ timeout → Sonnet · medium")
+  expect(await shown($, w)).toBe("Clef ✕ timeout → Sonnet · medium")
 })
 
 test("not configured: no request, one notice, the fallback route", {}, async ($, on) => {
   const w = world(on)
   await start($)
-  expect(w.statuses.at(-1)).toBe("Clef: not configured")
+  expect(await shown($, w)).toBe("Clef: not configured")
   await $.turn.start({ turnId: "t1", text: "Add pagination" })
   await $.turn.start({ turnId: "t2", text: "Add tests" })
   await step($, "t2", 0)
@@ -281,5 +292,5 @@ test("a reload with credentials replaces a stale 'not configured' status", { opt
   await start($)
   await $.turn.start({ turnId: "t1", text: "Debug the deadlock" })
   await start($)
-  expect(w.statuses.at(-1)).toBe("Clef → Opus · high · 82%")
+  expect(await shown($, w)).toBe("Clef → Opus · high · 82%")
 })

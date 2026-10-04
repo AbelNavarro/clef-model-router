@@ -2,7 +2,7 @@
 
 Start with `/clef`: it shows the mode, configuration problems, the last decision and why, today's Clef usage, and whether calls are paused.
 
-## Nothing happens: no status line, no `/clef`
+## Nothing happens: no `↳ Clef` line, no `/clef`
 
 - **Claude Code too old.** Mods need 2.1.287 or later. Check with `claude --version`, then `claude update`.
 - **The mod did not load.** Run `/plugin`; the line under the tabs names the active mods (`1 mod active · clef-model-router`). If it is missing:
@@ -10,7 +10,7 @@ Start with `/clef`: it shows the mode, configuration problems, the last decision
   - run `/reload-plugins`;
   - start with `claude --debug` and look for lines starting `clef-model-router:`.
 - **Mods are turned off** by `disableAllHooks`, `--safe-mode`, or an organization's `allowManagedModsOnly`. See [Turn mods on or off](https://code.claude.com/docs/en/plugins/mods/overview#turn-mods-on-or-off).
-- **The VS Code chat panel and `claude -p`** run the mod, but draw no status line. Use `/clef`, or set `announce` to `answer`.
+- **The route line is drawn only in the terminal** (at the end of the hint line under the prompt). In the Desktop app, the VS Code chat panel and `claude -p`, use `/clef`, or set `announce` to `answer`.
 
 ## `Clef: not configured`
 

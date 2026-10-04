@@ -41,7 +41,7 @@ Then give it your Cloudflare credentials. In Claude Code:
 
 - **Cloudflare account ID** and **API token**: see [Get your Cloudflare account ID and API token](#get-your-cloudflare-account-id-and-api-token) below. The token is masked when you type it and is stored in your system's secure credential store, not in `settings.json`.
 
-If the mod is already loaded, run `/reload-plugins`; otherwise start a new session. You should see `Clef ready · clef-flash` under the prompt.
+If the mod is already loaded, run `/reload-plugins`; otherwise start a new session. You should see `↳ Clef ready · clef-flash` at the end of the hint line under the prompt.
 
 To uninstall: `claude plugin uninstall clef-model-router@clef-model-router`. To stop it without uninstalling, use `/clef off` (this session) or set **Routing enabled** to off in `/config`.
 
@@ -115,7 +115,7 @@ On the same **Use REST API** panel, under **Get Account ID**, copy the **Account
 
 ## What you see
 
-- **Under the prompt**, a one-line status for the current turn: `Clef → Sonnet · medium · 87%`. The percentage is the probability Clef gave the level it picked. When policy changed Clef's pick, the reason follows in brackets, for example `(held for cache)` or `(unsure)`. When Clef could not answer: `Clef ✕ timeout → Sonnet · medium`.
+- **Under the prompt**, dimmed at the end of the hint line, the current route: `↳ Clef → Sonnet · medium · 87%` (terminal; on other surfaces set `announce` to `answer`). The percentage is the probability Clef gave the level it picked. When policy changed Clef's pick, the reason follows in brackets, for example `(held for cache)` or `(unsure)`. When Clef could not answer: `Clef ✕ timeout → Sonnet · medium`.
 - **`/clef`** shows the full picture: mode, the last decision with Clef's full probability distribution, latency, every policy adjustment and why, today's Clef usage, and the cache state.
 
 ```

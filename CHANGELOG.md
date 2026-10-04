@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-04
+
+### Changed
+
+- The route is shown dimmed at the end of the hint line under the prompt (`↳ Clef → …`), instead of in Claude Code's plugin status line, which prefixes a ⚠ that reads as a warning.
+
 ## [0.1.2] - 2026-10-04
 
 ### Fixed
