@@ -41,7 +41,7 @@ Then give it your Cloudflare credentials. In Claude Code:
 
 - **Cloudflare account ID** and **API token**: see [Get your Cloudflare account ID and API token](#get-your-cloudflare-account-id-and-api-token) below. The token is masked when you type it and is stored in your system's secure credential store, not in `settings.json`.
 
-If the mod is already loaded, run `/reload-plugins`; otherwise start a new session. You should see `↳ Clef ready · clef-flash` at the end of the hint line under the prompt.
+If the mod is already loaded, run `/reload-plugins`; otherwise start a new session. You should see `↳ Clef: awaiting prompt` at the end of the hint line under the prompt.
 
 To uninstall: `claude plugin uninstall clef-model-router@clef-model-router`. To stop it without uninstalling, use `/clef off` (this session) or set **Routing enabled** to off in `/config`.
 
@@ -94,7 +94,7 @@ On the same **Use REST API** panel, under **Get Account ID**, copy the **Account
    ```
 
 2. Paste the Account ID into *Cloudflare account ID*, and the token into *Cloudflare API token*. The token field is masked, and the value is kept in your system's secure credential store.
-3. Run `/reload-plugins`. The line under the prompt should read `Clef ready · clef-flash`.
+3. Run `/reload-plugins`. The line under the prompt should read `Clef: awaiting prompt`.
 
 **6. Check that it works**
 

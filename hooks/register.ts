@@ -410,7 +410,7 @@ async function registerCommand($: EngineInterface): Promise<void> {
     // Always replace what an earlier load showed (a stale "not configured"
     // survives a reload otherwise): the last route if there is one.
     const last = state.history.at(-1)?.decision
-    showStatus($, (last && statusLine(last)) ?? `Clef ready · ${config.decisionModel}`)
+    showStatus($, (last && statusLine(last)) ?? "Clef: awaiting prompt")
   }
 }
 
@@ -418,7 +418,11 @@ async function onClear($: EngineInterface): Promise<void> {
   // /clear starts a new conversation: nothing is cached and nothing continues.
   delete state.last
   delete state.cache
+  delete state.pendingOverride
+  state.history = []
+  runs.clear()
   logFile = undefined
+  if (config.enabled && config.accountId && config.apiToken) showStatus($, "Clef: awaiting prompt")
   await save($)
 }
 
