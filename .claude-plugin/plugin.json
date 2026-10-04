@@ -5,8 +5,8 @@
   "author": {
     "name": "Abel Navarro"
   },
-  "homepage": "https://github.com/AbelNavarro/clef-claude-router",
-  "repository": "https://github.com/AbelNavarro/clef-claude-router",
+  "homepage": "https://github.com/AbelNavarro/clef-model-router",
+  "repository": "https://github.com/AbelNavarro/clef-model-router",
   "license": "Apache-2.0",
   "keywords": [
     "router",

@@ -5,7 +5,7 @@ Thanks for helping. This project is deliberately small: a Claude Code mod that r
 ## Setup
 
 ```sh
-git clone https://github.com/AbelNavarro/clef-claude-router && cd clef-claude-router
+git clone https://github.com/AbelNavarro/clef-model-router && cd clef-model-router
 npm install
 claude --plugin-dir .   # once: Claude Code lays its mod API declarations in .claude-plugin/types/
 npm run types        # copy them to .types/ (falls back to the published, older copy)

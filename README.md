@@ -29,7 +29,7 @@ The goal is not "always the cheapest model". It is **the least expensive configu
 ## Install
 
 ```sh
-claude plugin marketplace add AbelNavarro/clef-claude-router
+claude plugin marketplace add AbelNavarro/clef-model-router
 claude plugin install clef-model-router@clef-model-router
 ```
 
@@ -49,8 +49,8 @@ To uninstall: `claude plugin uninstall clef-model-router@clef-model-router`. To 
 <summary>Try it for one session without installing</summary>
 
 ```sh
-git clone https://github.com/AbelNavarro/clef-claude-router
-CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... claude --plugin-dir ./clef-claude-router
+git clone https://github.com/AbelNavarro/clef-model-router
+CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... claude --plugin-dir ./clef-model-router
 ```
 
 Credentials in environment variables are inherited by every command Claude runs, so prefer `/plugin configure` for regular use.
