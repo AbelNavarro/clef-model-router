@@ -39,7 +39,7 @@ Then give it your Cloudflare credentials. In Claude Code:
 /plugin configure clef-model-router@clef-model-router
 ```
 
-- **Cloudflare account ID** and **API token**: in the [Cloudflare dashboard](https://dash.cloudflare.com/?to=/:account/ai/workers-ai), open **Workers AI → Use REST API**, copy the Account ID, then **Create a Workers AI API Token**. The token is masked when you type it and is stored in your system's secure credential store, not in `settings.json`.
+- **Cloudflare account ID** and **API token**: see [Get your Cloudflare account ID and API token](#get-your-cloudflare-account-id-and-api-token) below. The token is masked when you type it and is stored in your system's secure credential store, not in `settings.json`.
 
 If the mod is already loaded, run `/reload-plugins`; otherwise start a new session. You should see `Clef ready · clef-flash` under the prompt.
 
@@ -55,6 +55,63 @@ CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... claude --plugin-dir ./clef-cl
 
 Credentials in environment variables are inherited by every command Claude runs, so prefer `/plugin configure` for regular use.
 </details>
+
+### Get your Cloudflare account ID and API token
+
+These steps follow Cloudflare's [Workers AI REST API guide](https://developers.cloudflare.com/workers-ai/get-started/rest-api/).
+
+**1. Create a Cloudflare account** (skip if you have one)
+
+1. Sign up at <https://dash.cloudflare.com/sign-up>.
+2. Verify your email.
+
+No credit card is needed. The free Workers plan includes 10,000 Workers AI neurons per day, roughly 2,000 routed prompts.
+
+**2. Open the Workers AI page**
+
+1. Log in at <https://dash.cloudflare.com>.
+2. In the sidebar, go to **AI → Workers AI**, or use the direct link: <https://dash.cloudflare.com/?to=/:account/ai/workers-ai>.
+3. If you have several accounts, pick the one to use.
+
+**3. Get the API token**
+
+1. On the Workers AI page, select **Use REST API**.
+2. Select **Create a Workers AI API Token**.
+3. Review the prefilled settings. The template grants Workers AI access only.
+4. Select **Create API Token**.
+5. Select **Copy API Token**. **Cloudflare shows the token only once**; if you lose it, create a new one.
+
+**4. Get the Account ID**
+
+On the same **Use REST API** panel, under **Get Account ID**, copy the **Account ID**: a 32-character hex string such as `0123456789abcdef0123456789abcdef`. It is also on the account home page under **Account details → Account ID**, and in the dashboard URL right after `dash.cloudflare.com/`.
+
+**5. Give them to the mod**
+
+1. In Claude Code, run:
+
+   ```
+   /plugin configure clef-model-router@clef-model-router
+   ```
+
+2. Paste the Account ID into *Cloudflare account ID*, and the token into *Cloudflare API token*. The token field is masked, and the value is kept in your system's secure credential store.
+3. Run `/reload-plugins`. The line under the prompt should read `Clef ready · clef-flash`.
+
+**6. Check that it works**
+
+- **Inside Claude Code:** `/clef test fix the typo in README` shows Clef's probabilities and latency.
+- **From a clone of this repository:** `npm run smoke` makes one real call. Export `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` first.
+
+**If you prefer a custom token**
+
+1. Go to **My Profile → API Tokens → Create Token → Create Custom Token**.
+2. Add **Account → Workers AI → Read** and **Account → Workers AI → Edit**. Cloudflare requires both for tokens made outside the template.
+3. Limit *Account Resources* to your account.
+
+**Good practice**
+
+- **Don't share the token.** Never paste it into a chat, a file in a repository, or a command line, where process lists and shell history can expose it.
+- **If it leaks,** delete it under **My Profile → API Tokens** and create a new one.
+- **To keep routing free,** stay on the free Workers plan. On Workers Paid, usage beyond the daily allocation is billed. The mod's local budget (9,000 neurons/day) guards against that by default.
 
 ## What you see
 
