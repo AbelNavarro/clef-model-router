@@ -391,7 +391,12 @@ async function registerCommand($: EngineInterface): Promise<void> {
   }
   if (!config.enabled) $.ui.status(undefined)
   else if (!config.accountId || !config.apiToken) $.ui.status("Clef: not configured")
-  else if (state.history.length === 0) $.ui.status(`Clef ready · ${config.decisionModel}`)
+  else {
+    // Always replace what an earlier load showed (a stale "not configured"
+    // survives a reload otherwise): the last route if there is one.
+    const last = state.history.at(-1)?.decision
+    $.ui.status((last && statusLine(last)) ?? `Clef ready · ${config.decisionModel}`)
+  }
 }
 
 async function onClear($: EngineInterface): Promise<void> {

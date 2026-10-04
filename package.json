@@ -1,6 +1,6 @@
 {
   "name": "clef-model-router",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Claude Code mod: picks the Claude model and reasoning effort for each turn with Cloudflare Clef.",
   "license": "Apache-2.0",

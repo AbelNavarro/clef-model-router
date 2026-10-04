@@ -275,3 +275,11 @@ test("an /effort change sets effort while Clef keeps picking the model; it lifts
   expect(w.steps.map((s) => `${s.model}:${String(s.effort)}`)).toEqual(["claude-opus-5-5:high", "claude-opus-5-5:low", "claude-opus-5-5:high"])
   expect(w.toasts.some((t) => t.includes("using your effort low"))).toBe(true)
 })
+
+test("a reload with credentials replaces a stale 'not configured' status", { options: CREDS }, async ($, on) => {
+  const w = world(on)
+  await start($)
+  await $.turn.start({ turnId: "t1", text: "Debug the deadlock" })
+  await start($)
+  expect(w.statuses.at(-1)).toBe("Clef → Opus · high · 82%")
+})

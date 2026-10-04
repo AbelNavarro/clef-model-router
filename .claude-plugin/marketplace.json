@@ -9,7 +9,7 @@
       "name": "clef-model-router",
       "source": "./",
       "description": "Picks the Claude model and reasoning effort for each turn with Cloudflare Clef, a fast decision model on Workers AI.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "category": "productivity",
       "keywords": ["router", "model", "effort", "clef", "cloudflare", "mod"]
     }

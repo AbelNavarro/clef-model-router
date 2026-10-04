@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-04
+
+### Fixed
+
+- A reload with valid credentials now replaces a stale `Clef: not configured` status line when the session already has routed turns.
+
 ## [0.1.1] - 2026-10-04
 
 ### Fixed
