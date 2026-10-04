@@ -1,0 +1,48 @@
+{"expected":"trivial","prompt":"Fix the spelling of \"recieve\" in README.md."}
+{"expected":"trivial","prompt":"rename the variable `cnt` to `count` in utils.py"}
+{"expected":"trivial","prompt":"Where is the function parse_config defined?"}
+{"expected":"trivial","prompt":"run the tests"}
+{"expected":"trivial","prompt":"Format src/server.ts with prettier."}
+{"expected":"trivial","prompt":"what node version does this project use?"}
+{"expected":"trivial","prompt":"Add a trailing newline to package.json."}
+{"expected":"trivial","prompt":"git status"}
+{"expected":"trivial","prompt":"Change the default port from 3000 to 8080 in config.yaml."}
+{"expected":"trivial","prompt":"Delete the unused import of `os` at the top of main.py."}
+{"expected":"simple","prompt":"Add a log line when the cache misses in getUser()."}
+{"expected":"simple","prompt":"Explain what this regex does: ^(?=.*\\d)(?=.*[a-z]).{8,}$"}
+{"expected":"simple","prompt":"Write a unit test for the slugify helper covering empty strings and unicode."}
+{"expected":"simple","prompt":"The build fails with 'Cannot find module ./utils' after I moved utils.ts into lib/. Fix the import."}
+{"expected":"simple","prompt":"Make the CLI print its version with --version."}
+{"expected":"simple","prompt":"Bump the eslint dependency to the latest 9.x and fix any new lint errors in the two files it flags."}
+{"expected":"simple","prompt":"Add a docstring to every public function in validators.py."}
+{"expected":"simple","prompt":"Why does `npm test` print a deprecation warning about punycode?"}
+{"expected":"standard","prompt":"Add pagination to the /orders endpoint following the pattern used by the other list endpoints."}
+{"expected":"standard","prompt":"Implement a retry with exponential backoff for the HTTP client, configurable via env vars, with tests."}
+{"expected":"standard","prompt":"Convert the settings page from class components to hooks."}
+{"expected":"standard","prompt":"Users report that the CSV export drops rows with commas inside quoted fields. Reproduce it with a test and fix it."}
+{"expected":"standard","prompt":"Add a dark mode toggle that persists in localStorage and respects prefers-color-scheme."}
+{"expected":"standard","prompt":"Write integration tests for the auth middleware using the existing test fixtures."}
+{"expected":"standard","prompt":"Add an endpoint to export a user's data as JSON, reusing the serializers we already have."}
+{"expected":"standard","prompt":"Refactor the three duplicated date-formatting functions into one shared helper and update the callers."}
+{"expected":"standard","prompt":"Set up a GitHub Actions workflow that runs lint, typecheck and tests on Node 20 and 22."}
+{"expected":"hard","prompt":"Debug why these tests intermittently deadlock only when run in parallel."}
+{"expected":"hard","prompt":"Memory usage of the worker grows by about 50MB per hour in production but not locally. Find the leak."}
+{"expected":"hard","prompt":"Our p99 latency doubled after upgrading the ORM. Profile the hot paths and find out what changed."}
+{"expected":"hard","prompt":"Refactor the payment module to support multiple currencies without breaking the existing API or stored data."}
+{"expected":"hard","prompt":"The session token validation looks wrong to me. Audit it for security issues and fix what you find."}
+{"expected":"hard","prompt":"Why does this async iterator sometimes yield the same item twice under load?"}
+{"expected":"hard","prompt":"I don't know this codebase at all. Figure out how requests flow from the router to the database and fix the N+1 queries in the reports page."}
+{"expected":"hard","prompt":"Should we use optimistic or pessimistic locking for inventory reservations here? Weigh it against our access patterns and implement the better one."}
+{"expected":"hard","prompt":"why is this flaky"}
+{"expected":"deep","prompt":"Study this subsystem, determine why its current architecture causes cascading failures under partial network partitions, propose alternatives, implement the least disruptive fix, and verify the failure mode no longer occurs."}
+{"expected":"deep","prompt":"Investigate why this distributed lock occasionally allows two workers to enter the critical section, reproduce the issue, determine whether the bug is in our Redis locking implementation or our retry behavior, and fix it without changing the external API."}
+{"expected":"deep","prompt":"Design a migration plan from our monolith's job queue to an event-driven architecture, with a rollout that keeps both running in parallel, then implement the first phase."}
+{"expected":"deep","prompt":"Our CRDT-based collaborative editor diverges between clients after reconnects. Find the root cause, prove it with a reproduction, and fix the merge logic."}
+{"expected":"deep","prompt":"Go through the whole storage engine, find every place where a crash could leave the WAL inconsistent with the data files, and make recovery correct."}
+{"expected":"deep","prompt":"Evaluate whether we should replace our hand-rolled RPC layer with gRPC: map every call site, estimate the risks, prototype the riskiest path, and write up a recommendation."}
+{"expected":"trivial","prompt":"Here is the error log:\n\n[2026-10-01 12:00:01] INFO starting\n[2026-10-01 12:00:02] INFO listening on :8080\n[2026-10-01 12:00:05] WARN config key 'tiemout' is unknown\n[2026-10-01 12:00:06] INFO ready\n\nJust fix the typo 'tiemout' in config.yaml.","note":"long paste, trivial task"}
+{"expected":"hard","prompt":"race in the scheduler again. look at it","note":"short, hard"}
+{"expected":"simple","prompt":"yes but also add a test for the empty case","note":"follow-up"}
+{"expected":"standard","prompt":"that didn't work, the pagination still returns duplicates on page 2","note":"follow-up, needs prior context"}
+{"expected":"simple","prompt":"Translate the error messages in errors.json to Spanish."}
+{"expected":"standard","prompt":"Add OpenTelemetry tracing to the three HTTP handlers and the database client."}

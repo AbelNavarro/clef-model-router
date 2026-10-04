@@ -1,0 +1,17 @@
+{
+  "name": "clef-model-router",
+  "owner": { "name": "Abel Navarro", "url": "https://github.com/AbelNavarro" },
+  "metadata": {
+    "description": "Claude Code mod that picks the model and effort for each turn with Cloudflare Clef."
+  },
+  "plugins": [
+    {
+      "name": "clef-model-router",
+      "source": "./",
+      "description": "Picks the Claude model and reasoning effort for each turn with Cloudflare Clef, a fast decision model on Workers AI.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "keywords": ["router", "model", "effort", "clef", "cloudflare", "mod"]
+    }
+  ]
+}

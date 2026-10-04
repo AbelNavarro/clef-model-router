@@ -1,0 +1,4 @@
+{
+  "description": "Per-turn routing: turn.start asks Cloudflare Clef how demanding the prompt is, turn.step sends the turn's requests with the chosen model and effort.",
+  "modules": ["./register.ts"]
+}

@@ -1,0 +1,74 @@
+{
+  "name": "clef-model-router",
+  "version": "0.1.0",
+  "description": "Picks the Claude model and reasoning effort for each turn with Cloudflare Clef, a fast decision model on Workers AI.",
+  "author": {
+    "name": "Abel Navarro"
+  },
+  "homepage": "https://github.com/AbelNavarro/clef-claude-router",
+  "repository": "https://github.com/AbelNavarro/clef-claude-router",
+  "license": "Apache-2.0",
+  "keywords": [
+    "router",
+    "model",
+    "effort",
+    "clef",
+    "cloudflare",
+    "workers-ai",
+    "mod"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cloudflare_account_id": {
+      "type": "string",
+      "title": "Cloudflare account ID",
+      "description": "Your Cloudflare account ID (dashboard → Workers AI → Use REST API). Falls back to $CLOUDFLARE_ACCOUNT_ID."
+    },
+    "cloudflare_api_token": {
+      "type": "string",
+      "title": "Cloudflare API token",
+      "description": "A Workers AI API token (dashboard → Workers AI → Use REST API → Create a Workers AI API Token). Kept in your system's secure credential store, never in settings.json. Falls back to $CLOUDFLARE_API_TOKEN.",
+      "sensitive": true
+    },
+    "decision_model": {
+      "type": "string",
+      "title": "Decision model",
+      "description": "clef-flash (fast, cheapest) or clef (larger, slower).",
+      "options": [
+        "clef-flash",
+        "clef"
+      ],
+      "default": "clef-flash"
+    },
+    "profiles": {
+      "type": "string",
+      "title": "Profiles",
+      "description": "model[:effort] for the five difficulty levels, lowest first: trivial, simple, standard, hard, deep. Aliases (haiku, sonnet, opus, fable) or full model IDs.",
+      "default": "haiku, sonnet:low, sonnet:medium, opus:high, opus:xhigh"
+    },
+    "announce": {
+      "type": "string",
+      "title": "Show the route",
+      "description": "status: a line under the prompt. answer: a line under each answer. both, or off.",
+      "options": [
+        "status",
+        "answer",
+        "both",
+        "off"
+      ],
+      "default": "status"
+    },
+    "enabled": {
+      "type": "boolean",
+      "title": "Routing enabled",
+      "description": "Off: the mod stays loaded and leaves every request as Claude Code makes it.",
+      "default": true
+    },
+    "log_prompts": {
+      "type": "boolean",
+      "title": "Log prompt text",
+      "description": "Include each prompt's text in the local log (off: only a hash and its length).",
+      "default": false
+    }
+  }
+}
