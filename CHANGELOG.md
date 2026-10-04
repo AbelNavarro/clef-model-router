@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-04
+
+### Changed
+
+- `/clear` resets the route: the last decision, history and any pending `/clef` override are dropped, and the hint line shows `Clef: awaiting prompt` until the next prompt is routed. A load with no routed turns shows the same, instead of `Clef ready · <model>`.
+
 ## [0.1.3] - 2026-10-04
 
 ### Changed
