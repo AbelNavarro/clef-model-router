@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-04
+
 ### Fixed
 
 - **The confidence threshold now compares the probability Clef gave its pick.** Before, it compared Clef's own `confidence` field, which live answers show is entropy-like and much lower (76% on one level reads about 50%). The low-confidence policy fired on almost every prompt as a result. The status line and `/clef` show the probability; Clef's figure is logged as `recommendation.clefConfidence`.
