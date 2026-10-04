@@ -1,6 +1,6 @@
 {
   "name": "clef-model-router",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Picks the Claude model and reasoning effort for each turn with Cloudflare Clef, a fast decision model on Workers AI.",
   "author": {
     "name": "Abel Navarro"

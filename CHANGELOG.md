@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-04
+
 ### Changed
 
 - **Downgrades off a warm cache are timed by what staying costs, not held for as long as the cache is warm.** The previous rule held every downgrade once 40k tokens were cached, which in practice kept the strongest model used so far for the rest of the session. A downgrade is now held while staying has cost less than the switch would, summed over the stretch, and then taken. See [ADR 0001](docs/adr/0001-downgrade-timing-by-billing-mode.md) and [docs/COSTS.md](docs/COSTS.md).
