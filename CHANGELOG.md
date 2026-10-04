@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- **The confidence threshold now compares the probability Clef gave its pick.** Before, it compared Clef's own `confidence` field, which live answers show is entropy-like and much lower (76% on one level reads about 50%). The low-confidence policy fired on almost every prompt as a result. The status line and `/clef` show the probability; Clef's figure is logged as `recommendation.clefConfidence`.
+
+### Changed
+
+- Docs state the end-to-end Clef latency measured live (0.3–0.5 s) and tokens per call (about 580). They also record the live cache measurements: an effort change kept the Opus 5.5 cache, and Sonnet 5.5 did not read the conversation cache across `-p` turns.
+- `docs/CALIBRATION.md` documents the log format field by field, with tested `jq` queries for joining feedback to turns.
+
 ## [0.1.0] - 2026-10-04
 
 First release.

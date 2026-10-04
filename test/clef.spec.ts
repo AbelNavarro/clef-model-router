@@ -89,7 +89,10 @@ describe("response parsing", () => {
     })
     assert.ok(r.ok)
     assert.equal(r.recommendation.level, "hard")
+    // The threshold works on the probability of the chosen level; Clef's own
+    // confidence figure is kept beside it.
     assert.equal(r.recommendation.confidence, 0.7)
+    assert.equal(r.recommendation.providerConfidence, 0.7)
     assert.equal(r.recommendation.score, 2.9)
     assert.equal(r.recommendation.contextDependent, 0.12)
     assert.equal(r.recommendation.inputTokens, 412)
@@ -137,10 +140,20 @@ describe("response parsing", () => {
     })
   }
 
-  test("a confidence outside 0..1 falls back to the top probability", () => {
+  test("confidence is the top probability, not Clef's entropy-like figure", () => {
+    // Real clef-flash answer: 76% on standard came back with confidence 0.50.
+    const answer = { ...SCORE_ANSWER, probabilities: { "0": 0.07, "1": 0.07, "2": 0.76, "3": 0.06, "4": 0.04 }, confidence: 0.5 }
+    const r = parseResponse(envelope({ difficulty: answer }), { provider: "x", rubric: DEFAULT_RUBRIC, latencyMs: 1 })
+    assert.ok(r.ok)
+    assert.equal(r.recommendation.level, "standard")
+    assert.equal(r.recommendation.confidence, 0.76)
+    assert.equal(r.recommendation.providerConfidence, 0.5)
+  })
+
+  test("a Clef confidence outside 0..1 is dropped", () => {
     const r = parseResponse(envelope({ difficulty: { ...SCORE_ANSWER, confidence: 3 } }), { provider: "x", rubric: DEFAULT_RUBRIC, latencyMs: 1 })
     assert.ok(r.ok)
-    assert.equal(r.recommendation.confidence, 0.7)
+    assert.equal(r.recommendation.providerConfidence, undefined)
   })
 })
 

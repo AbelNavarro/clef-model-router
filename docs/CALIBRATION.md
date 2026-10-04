@@ -44,13 +44,13 @@ Output, one row per prompt:
     41  deep      .88  ▁▁▁▁▇           deep      deep    ✓  Study this subsystem, determine why ...
 
   labelled 48: exact 41 (85%) · within one level 47 (98%) · under-routed 3 · over-routed 4 · failures 0
-  latency mean 41 ms · p50 40 ms · p95 52 ms (includes your network round trip)
+  latency mean 420 ms · p50 410 ms · p95 530 ms (includes your network round trip)
   input tokens/call ~503 · ~4.1 neurons/call · ~2432 calls/day in the 10,000-neuron free allocation (estimate)
 ```
 
 (These sample rows show the format only. Real numbers depend on Clef and on your network; record yours in your notes or a PR when you change the rubric.)
 
-- `clef` is Clef's most probable level, and `conf` its confidence.
+- `clef` is Clef's most probable level, and `conf` the probability Clef gave it.
 - `dist` shows the probabilities for trivial, simple, moderate, hard and deep.
 - `route` is the level after the default confidence policy.
 - `↓` marks a route below the label (too weak; the costly mistake) and `↑` a route above it (only cost).
@@ -101,16 +101,67 @@ Two signals accumulate in your local log as you work:
 `/clef stats 30` summarizes the last 30 days:
 
 - turns by model, effort, profile and source
-- Clef latency (mean, p50, p95) and mean confidence
+- Clef latency (mean, p50, p95) and the mean probability of Clef's pick
 - how often policy changed Clef's pick, cache holds, manual overrides, fallbacks by cause
 - your feedback counts
 
-For deeper analysis, the log is plain JSONL:
+## The log format
+
+There is one file per UTC day and session: `~/.claude/plugins/data/clef-model-router/routing-<YYYY-MM-DD>-<session>.jsonl`. Each line is one JSON object, either a turn record or a feedback record, and every record has `"v": 1`. Fields are only added, never renamed; a breaking change would bump `v`.
+
+### Turn records (`"type": "turn"`), written when a turn ends
+
+| Field | Meaning |
+| --- | --- |
+| `ts`, `session`, `turn` | When the turn ended, the Claude Code session ID, and the turn ID |
+| `kind` | `prompt`, `go-ahead`, `notification` (a background task woke the session) or `empty` |
+| `source` | Where the route came from: `clef`, `fallback` (Clef failed), `override` (`+target`), `pin` (`/clef pin`), `continuation` (reused the last route), `native` (paused after `/model`), or `disabled` |
+| `promptHash`, `promptChars` | First 16 hex characters of the prompt's SHA-256, and its length |
+| `prompt` | The prompt text: **only with `log_prompts` on** |
+| `provider` | `clef-flash` or `clef`, when Clef answered |
+| `recommendation.level` | Clef's most probable level: `trivial`, `simple`, `standard`, `hard` or `deep` |
+| `recommendation.confidence` | The probability of that level: what `confidence_threshold` compares |
+| `recommendation.clefConfidence` | Clef's own `confidence` field (entropy-like, lower than the probability) |
+| `recommendation.probabilities` | The probability of each of the five levels |
+| `recommendation.score` | Clef's probability-weighted level, 0–4 |
+| `recommendation.followUp` | Probability that the prompt is a follow-up defined by earlier turns |
+| `latencyMs`, `clefInputTokens` | Clef round trip as measured by the mod; tokens Cloudflare billed |
+| `proposed` | The route Clef's level maps to, before policy: `{ level, model, effort }` |
+| `final` | The route sent: `{ level?, model, effort? }`. Absent: Claude Code's own model and effort were left alone |
+| `adjustments[]` | Every policy change, in order: `{ rule, from, to, reason }`. The rule is `low-confidence`, `context-dependent`, `unavailable`, `context-window`, `cache-hold`, `pinned-effort`, `effort-cap` or `effort-clamp` |
+| `failure` | When Clef did not answer: `{ kind, message, status? }`. The kind is `timeout`, `network`, `auth`, `quota`, `budget`, `rate-limited`, `server`, `bad-request`, `malformed`, `not-configured` or `circuit-open` |
+| `note` | A human-readable reason for a fallback, continuation or unrouted turn |
+| `answered` | What the Claude API reported, summed over the turn's main-loop requests: `{ model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }` |
+| `steps`, `durationMs`, `endReason` | Model requests in the turn, wall time, and `answer`, `aborted`, `refusal` or `error` |
+
+### Feedback records (`"type": "feedback"`), written by `/clef feedback`
+
+| Field | Meaning |
+| --- | --- |
+| `ts`, `session` | When, and in which session |
+| `turn` | The turn the verdict is about: the last turn before the command |
+| `verdict` | `under` (needed more capability), `ok`, or `over` (more than needed) |
+| `note` | Optional free text after the verdict |
+
+### Questions the log answers
+
+- **Was Clef right?** Join each feedback record to the turn with the same `turn` ID, and compare `verdict` with `recommendation.level` and `final.level`.
+- **Did I override it?** Within a session, records are in time order. A `source: "override"` turn straight after a `clef` turn is a manual correction of that turn.
+- **Is 55% the right threshold?** `recommendation.probabilities` is complete, so the policy can be replayed offline at any threshold and compared with your verdicts.
+- **What did policy change, and why?** `proposed` vs `final`, plus `adjustments`.
+- **Did a route cost cache?** `answered.cacheReadTokens` vs `cacheWriteTokens`.
+
+For classifying *which kinds* of tasks Clef gets wrong, the prompt text matters. Turn on `log_prompts` while you collect calibration data. The log never leaves your machine.
 
 ```sh
+# Clef's level vs the route taken vs the probability, most common first
 cat ~/.claude/plugins/data/clef-model-router/routing-*.jsonl \
   | jq -r 'select(.type=="turn" and .recommendation) | [.recommendation.level, .final.level, (.recommendation.confidence*100|floor)] | @tsv' \
   | sort | uniq -c | sort -rn
-```
 
-A good next step for a contributor is a script that joins feedback records to their turns and reports agreement by level.
+# Each verdict next to the turn it judges
+cat ~/.claude/plugins/data/clef-model-router/routing-*.jsonl | jq -s -r '
+  (map(select(.type=="turn")) | INDEX(.turn)) as $t
+  | .[] | select(.type=="feedback") | $t[.turn] as $r
+  | [.verdict, $r.recommendation.level // "-", $r.final.level // $r.final.model // "-", ($r.recommendation.confidence // 0 | .*100 | floor), ($r.prompt // $r.promptHash)] | @tsv'
+```

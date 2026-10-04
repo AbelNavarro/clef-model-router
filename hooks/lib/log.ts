@@ -29,7 +29,10 @@ export type TurnRecord = {
   provider?: string
   recommendation?: {
     level: Level
+    /** Probability of `level`: what the threshold compares. */
     confidence: number
+    /** Clef's own `confidence` field (entropy-like; not a probability). */
+    clefConfidence?: number
     probabilities: Record<Level, number>
     score?: number
     followUp?: number
@@ -96,6 +99,7 @@ export function turnRecord(args: {
   if (rec) {
     record.provider = rec.provider
     record.recommendation = { level: rec.level, confidence: rec.confidence, probabilities: { ...rec.probabilities } }
+    if (rec.providerConfidence !== undefined) record.recommendation.clefConfidence = rec.providerConfidence
     if (rec.score !== undefined) record.recommendation.score = rec.score
     if (rec.contextDependent !== undefined) record.recommendation.followUp = rec.contextDependent
     record.latencyMs = rec.latencyMs

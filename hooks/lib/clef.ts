@@ -189,10 +189,11 @@ export function parseResponse(
   const recommendation: Recommendation = {
     provider: opts.provider,
     level,
-    confidence: confidence !== undefined && confidence >= 0 && confidence <= 1 ? confidence : probabilities[level],
+    confidence: probabilities[level],
     probabilities,
     latencyMs: opts.latencyMs,
   }
+  if (confidence !== undefined && confidence >= 0 && confidence <= 1) recommendation.providerConfidence = confidence
   if (score !== undefined) recommendation.score = score
   if (contextDependent !== undefined && contextDependent >= 0 && contextDependent <= 1) recommendation.contextDependent = contextDependent
   const inputTokens = usage ? num(usage.input_tokens) : undefined

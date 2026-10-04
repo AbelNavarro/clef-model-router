@@ -13,7 +13,7 @@ Study this subsystem, find why it cascades under partitions, ...    Clef → Opu
 
 Routing is an optimization. If Clef is slow, down, unconfigured or out of free quota, the turn still runs on a deterministic fallback. Claude Code always keeps working.
 
-> **Status: v0.1.** The mod, the policy and the failure paths are tested against Claude Code 2.1.289's own test host, and in live Claude Code sessions with a mock Workers AI endpoint. The examples above show the output format; they are not measured Clef results. Run `npm run calibrate` with your own credentials to see real ones (see [Calibration](docs/CALIBRATION.md)).
+> **Status: v0.1, in dogfooding.** The mod, the policy and the failure paths are tested against Claude Code 2.1.289's own test host, in live sessions against a mock Workers AI endpoint, and with live Clef-flash calls on a handful of prompts. How well Clef routes real coding work is not measured yet; that is what the local log and `/clef feedback` are for. The examples above show the output format; see [Calibration](docs/CALIBRATION.md).
 
 ## Why
 
@@ -115,14 +115,14 @@ On the same **Use REST API** panel, under **Get Account ID**, copy the **Account
 
 ## What you see
 
-- **Under the prompt**, a one-line status for the current turn: `Clef → Sonnet · medium · 87%`. That is Clef's confidence in the difficulty level it picked. When policy changed Clef's pick, the reason follows in brackets, for example `(held for cache)` or `(unsure)`. When Clef could not answer: `Clef ✕ timeout → Sonnet · medium`.
+- **Under the prompt**, a one-line status for the current turn: `Clef → Sonnet · medium · 87%`. The percentage is the probability Clef gave the level it picked. When policy changed Clef's pick, the reason follows in brackets, for example `(held for cache)` or `(unsure)`. When Clef could not answer: `Clef ✕ timeout → Sonnet · medium`.
 - **`/clef`** shows the full picture: mode, the last decision with Clef's full probability distribution, latency, every policy adjustment and why, today's Clef usage, and the cache state.
 
 ```
 Last turn
   route     Opus · high  (claude-opus-5-5, profile hard)
   source    clef
-  clef      clef-flash: hard · confidence 72% · score 2.88/4 · follow-up 4% · 50 ms · 431 tokens
+  clef      clef-flash: 72% on hard · clef confidence 52% · score 2.88/4 · follow-up 4% · 410 ms · 580 tokens
     trivial   ····················   1%
     simple    █···················   3%
     standard  ███·················  16%
@@ -153,7 +153,7 @@ Last turn
 ## How it decides
 
 ```
-prompt ──► turn.start ──► Clef-flash: difficulty 0-4 (+ "is this a follow-up?")   one call, ~40 ms model time
+prompt ──► turn.start ──► Clef-flash: difficulty 0-4 (+ "is this a follow-up?")   one call, ~0.3–0.5 s end to end
                   │
                   ▼
            policy (deterministic): overrides → continuation → confidence → follow-up floor
@@ -176,13 +176,14 @@ prompt ──► turn.start ──► Clef-flash: difficulty 0-4 (+ "is this a f
   | deep | `opus:xhigh` | open-ended investigation and design |
 
   Haiku 4.5 takes no effort setting, so the trivial level sends none.
-- **Cache-aware.** Each model has its own prompt cache. Moving a long, warm conversation to a cheaper model re-reads all of it uncached, which can cost more than it saves. On a downgrade where at least 40k tokens are cached and the cache is still warm, the mod keeps the current model and changes only the effort. On Opus 5.5, Sonnet 5.5 and Fable 5.1, changing effort keeps the cache. Upgrades are never held back.
-- **Low confidence** (below 55%): by default the mod takes the more capable of Clef's two likeliest levels. This is configurable.
+- **Cache-aware.** Each model has its own prompt cache. Moving a long, warm conversation to a cheaper model re-reads all of it uncached, which can cost more than it saves. On a downgrade where at least 40k tokens are cached and the cache is still warm, the mod keeps the current model and changes only the effort. Anthropic documents that changing effort keeps the cache on Opus 5.5, Sonnet 5.5 and Fable 5.1; for Opus 5.5 this was confirmed live through the mod. Upgrades are never held back.
+- **Low confidence** (Clef gives its pick less than 55%): by default the mod takes the more capable of Clef's two likeliest levels. The threshold and policy are configurable, and every change is logged.
+- **Latency.** Clef-flash's model time is about 40 ms (Cloudflare's figure), but a routed prompt waits for the whole round trip: 340–530 ms in the first live tests. Go-aheads, overrides and pinned sessions skip the call.
 - **You stay in control.** `+target` beats `/clef pin`, which beats Clef. A `/model` change mid-session pauses routing until `/clef auto`. An `/effort` change sets the effort while Clef keeps choosing the model. Subagents keep their own models.
 
 ## Cost
 
-Routing itself runs on your Cloudflare account. Clef-flash costs **$0.09 per million input tokens** and has no charged output. One routing call sends about **500 input tokens** for a typical prompt (the rubric plus your prompt) and up to about 2,000 for a long one, since prompts are cut to 6,000 characters. That works out to roughly **4 neurons per call**, or about **2,000 routed prompts a day** inside Workers AI's free allocation of **10,000 neurons per day** (resets 00:00 UTC). These are estimates derived from Cloudflare's published prices; Clef is not yet in Cloudflare's per-model neuron table.
+Routing itself runs on your Cloudflare account. Clef-flash costs **$0.09 per million input tokens** and has no charged output. One routing call used **about 580 input tokens** for typical prompts in live tests (the rubric plus your prompt), and up to about 2,000 for a long one, since prompts are cut to 6,000 characters. That works out to roughly **5 neurons per call**, or about **2,000 routed prompts a day** inside Workers AI's free allocation of **10,000 neurons per day** (resets 00:00 UTC). These are estimates derived from Cloudflare's published prices; Clef is not yet in Cloudflare's per-model neuron table.
 
 What happens at the limit depends on your Cloudflare plan ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)):
 

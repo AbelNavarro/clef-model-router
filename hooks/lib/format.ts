@@ -70,13 +70,14 @@ export function explain(d: Decision): string[] {
   const rec = d.recommendation
   if (rec) {
     const extras = [
-      `confidence ${pct(rec.confidence)}`,
+      `${pct(rec.confidence)} on ${rec.level}`,
+      rec.providerConfidence !== undefined ? `clef confidence ${pct(rec.providerConfidence)}` : "",
       rec.score !== undefined ? `score ${rec.score.toFixed(2)}/4` : "",
       rec.contextDependent !== undefined ? `follow-up ${pct(rec.contextDependent)}` : "",
       `${rec.latencyMs} ms`,
       rec.inputTokens !== undefined ? `${rec.inputTokens} tokens` : "",
     ].filter(Boolean)
-    lines.push(`  clef      ${rec.provider}: ${rec.level} · ${extras.join(" · ")}`)
+    lines.push(`  clef      ${rec.provider}: ${extras.join(" · ")}`)
     lines.push(...distribution(rec.probabilities, rec.level, d.final?.level))
   }
   if (d.failure) lines.push(`  failure   ${d.failure.kind}: ${d.failure.message}${d.failure.latencyMs ? ` (${d.failure.latencyMs} ms)` : ""}`)
@@ -179,7 +180,7 @@ export function statsReport(s: Stats, days: number, files: number): string {
   lines.push("  clef")
   lines.push(`    calls ${s.clefCalls} · ${kTokens(s.clefInputTokens)} input tokens`)
   if (s.latency) lines.push(`    latency mean ${s.latency.mean} ms · p50 ${s.latency.p50} ms · p95 ${s.latency.p95} ms`)
-  if (s.meanConfidence !== undefined) lines.push(`    mean confidence ${pct(s.meanConfidence)}`)
+  if (s.meanConfidence !== undefined) lines.push(`    mean probability of Clef's pick ${pct(s.meanConfidence)}`)
   lines.push(`    recommendation changed by policy: ${s.recommendationChanged} · cache holds: ${s.cacheHolds} · manual overrides: ${s.overrides}`)
   const failures = Object.entries(s.failures)
   if (failures.length > 0) lines.push(`    fallbacks: ${failures.map(([k, v]) => `${k} ${v}`).join(", ")}`)

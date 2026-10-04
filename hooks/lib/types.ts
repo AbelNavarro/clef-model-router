@@ -38,8 +38,17 @@ export type Recommendation = {
   /** e.g. "clef-flash", "clef". */
   provider: string
   level: Level
-  /** The provider's confidence in `level`, 0..1. */
+  /**
+   * The probability the provider gave `level`, 0..1. This is what the
+   * confidence threshold compares and what the status line shows.
+   */
   confidence: number
+  /**
+   * The provider's own certainty figure, when it reports one. Clef's
+   * `confidence` is not the top probability (it behaves like 1 - normalised
+   * entropy: 76% on one level reads about 50%), so it is kept for analysis only.
+   */
+  providerConfidence?: number
   /** Probability per level; sums to ~1. */
   probabilities: Record<Level, number>
   /** Probability-weighted level (0..4), when the provider gives one. */

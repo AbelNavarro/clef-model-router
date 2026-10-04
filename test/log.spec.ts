@@ -45,6 +45,7 @@ describe("log records", () => {
     assert.equal(r.promptHash, hash)
     assert.equal(r.promptChars, 18)
     assert.equal(r.recommendation?.level, "hard")
+    assert.equal(r.recommendation?.confidence, 0.8)
     assert.equal(r.final?.model, "claude-opus-5-5")
     assert.equal(r.latencyMs, 42)
     const withText = turnRecord({ decision: d, session: "s1", ts: "x", promptText: "Debug", logPrompts: true })

@@ -308,3 +308,21 @@ describe("effort cap and clamp", () => {
     assert.equal(d.final?.effort, undefined)
   })
 })
+
+describe("confidence semantics (real clef-flash answers)", () => {
+  test("a clear 60% pick stays put even though Clef's own confidence reads 31%", () => {
+    const r = rec("trivial", 0.6, { providerConfidence: 0.31 })
+    r.probabilities = { trivial: 0.6, simple: 0.28, standard: 0.08, hard: 0.02, deep: 0.02 }
+    const d = decide(input({ result: ok(r) }))
+    assert.equal(d.final?.level, "trivial")
+    assert.deepEqual(d.adjustments, [])
+  })
+
+  test("a split 47/35 pick still moves to the more capable of the two", () => {
+    const r = rec("trivial", 0.47, { providerConfidence: 0.2 })
+    r.probabilities = { trivial: 0.47, simple: 0.35, standard: 0.1, hard: 0.05, deep: 0.03 }
+    const d = decide(input({ result: ok(r) }))
+    assert.equal(d.final?.level, "simple")
+    assert.equal(d.adjustments[0]?.rule, "low-confidence")
+  })
+})

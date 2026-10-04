@@ -64,13 +64,18 @@ Everything below was checked against current documentation (October 2026) and, w
 
 - Each model has its own cache. A model switch re-reads the whole conversation uncached.
 - Changing effort keeps the cache on Opus 5.5, Sonnet 5.5 and Fable 5.1 with an API key or a subscription. It does not on other models, on Bedrock or Vertex, through a gateway, or with experimental betas disabled.
+- **Measured live (Claude Code 2.1.289, subscription, `claude -p --continue`, ~42k-token conversation):**
+  - Opus 5.5 high → low through the mod's rewrite: 42.5k read, 0.1k written. The cache was kept.
+  - A model switch: only the shared ~8–10k system prefix was read.
+  - Haiku routed from an Opus session cached normally across turns.
+  - **Sonnet 5.5 never read the conversation from cache across turns, even in plain Claude Code with the router bypassed and the effort unchanged.** Each turn re-wrote it (~24–33k). The cause is unknown and may be specific to `-p`. The log records cache read and write per turn, so real sessions will show whether it holds interactively. If it does, routing long conversations to Sonnet costs more than the cache-hold rule assumes.
 - The TTL is one hour on a subscription within plan usage, and five minutes with an API key or a cloud provider. It can be overridden by `CLAUDE_CODE_PROMPT_CACHE_TTL`, the `promptCacheTtl` setting and related variables. The mod resolves it the same way.
 - The system-prompt prefix is shared across sessions per model. In a new session, a request on Haiku read about 17k tokens from cache.
 
 **Clef on Workers AI** ([blog](https://blog.cloudflare.com/clef-decision-models/), [clef-flash](https://developers.cloudflare.com/workers-ai/models/clef-flash/), [clef](https://developers.cloudflare.com/workers-ai/models/clef/), [pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/), [errors](https://developers.cloudflare.com/workers-ai/platform/errors/), [limits](https://developers.cloudflare.com/workers-ai/platform/limits/))
 
 - Request: `POST /client/v4/accounts/{account}/ai/run/@cf/cloudflare/clef-flash` with `Authorization: Bearer`. The body is `{ model, state, questions }` with 1 to 64 typed questions: `noul` (yes/no), `choice` (2 to 255 options) and `score` (an ordered rubric of 2 to 10 levels, indexed from 0).
-- Response: `result.answers[id]`. A `score` answer carries the probability-weighted `score`, `legend`, `probabilities` (summing to 1) and `confidence`. A `choice` answer carries `choice`, `probabilities` and `confidence`. A `noul` answer carries the probability of yes. `usage` carries input and output tokens. The mod's parser follows the published JSON schemas.
+- Response: `result.answers[id]`. A `score` answer carries the probability-weighted `score`, `legend`, `probabilities` (summing to 1) and `confidence`. **Clef's `confidence` is not the probability of the chosen level.** Live answers behave like 1 − normalised entropy: 47% on one level reads 20%, 76% reads 50%, 88% reads 73%. The router thresholds on the probability of the chosen level, which is what people read a percentage as, and logs Clef's figure beside it so a later analysis can tell which predicts mistakes better. A `choice` answer carries `choice`, `probabilities` and `confidence`. A `noul` answer carries the probability of yes. `usage` carries input and output tokens. The mod's parser follows the published JSON schemas.
 - Latency (Cloudflare's figures): Clef-flash 38.8 ms median and 122 ms p95; Clef 209 ms median. Both models have a 64k context. Your network round trip comes on top.
 - Price: $0.09 per million input tokens for Clef-flash and $0.24 for Clef, input only. The free allocation is 10,000 neurons per day across Workers AI, reset at 00:00 UTC. Error 3036 (HTTP 429) means the allocation is used up; 3040 (HTTP 429) means capacity. Text-generation models are limited to 300 requests per minute.
 - Clef is open-weight (Apache-2.0) and compatible with the Jev API.
