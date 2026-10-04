@@ -1,9 +1,11 @@
 // Everything the router shows: the one-line status, and the text of each
 // /clef subcommand. Plain text, so it reads the same on every surface.
 
-import type { Config } from "./config.ts"
+import type { BillingOption, Config } from "./config.ts"
+import type { BillingFacts } from "./env.ts"
 import { displayName, resolveModel, type ModelEnv } from "./models.ts"
-import { describe, kTokens, pct, type RouterMode } from "./policy.ts"
+import { describe, kTokens, pct, type HoldState, type RouterMode } from "./policy.ts"
+import { dollars, type Billing } from "./pricing.ts"
 import { presence } from "./redact.ts"
 import type { Stats } from "./log.ts"
 import { LEVELS, type Decision, type Level, type Target } from "./types.ts"
@@ -19,10 +21,20 @@ const RULE_LABEL: Record<string, string> = {
   "pinned-effort": "pinned effort",
 }
 
+/**
+ * A held downgrade names what it held back, so a route that differs from
+ * Clef's pick says so: "(Sonnet deferred)", or "(low effort deferred)".
+ */
+function holdLabel(d: Decision): string {
+  const w = d.deferral?.wanted
+  if (!w || !d.final) return RULE_LABEL["cache-hold"]!
+  return w.model === d.final.model ? `${w.effort ?? "lower"} effort deferred` : `${displayName(w.model)} deferred`
+}
+
 /** The one line under the prompt, e.g. "Clef → Sonnet · medium · 87%". */
 export function statusLine(d: Decision): string | undefined {
   const route = d.final ? describe(d.final) : undefined
-  const notes = d.adjustments.map((a) => RULE_LABEL[a.rule] ?? a.rule)
+  const notes = d.adjustments.map((a) => (a.rule === "cache-hold" ? holdLabel(d) : (RULE_LABEL[a.rule] ?? a.rule)))
   const tail = notes.length > 0 ? ` (${[...new Set(notes)].join(", ")})` : ""
   switch (d.source) {
     case "clef": {
@@ -82,6 +94,15 @@ export function explain(d: Decision): string[] {
   }
   if (d.failure) lines.push(`  failure   ${d.failure.kind}: ${d.failure.message}${d.failure.latencyMs ? ` (${d.failure.latencyMs} ms)` : ""}`)
   for (const a of d.adjustments) lines.push(`  policy    ${a.rule}: ${a.from} → ${a.to} — ${a.reason}`)
+  const f = d.deferral
+  if (f) {
+    const what = f.wanted.model === f.from ? `${f.wanted.effort ?? "lower"} effort` : displayName(f.wanted.model)
+    lines.push(
+      f.held
+        ? `  downgrade ${what} deferred (held turn ${f.turns}): staying has cost ${dollars(f.spent)} so far, a switch costs ${dollars(f.cost)} now (${f.billing}, list prices)`
+        : `  downgrade ${what} taken after ${f.turns} held turn${f.turns === 1 ? "" : "s"}: staying had cost ${dollars(f.spent)}, the switch ${dollars(f.cost)} (${f.billing}, list prices)`,
+    )
+  }
   return lines
 }
 
@@ -94,6 +115,8 @@ export type StatusArgs = {
   last?: Decision
   guard: { calls: number; inputTokens: number; neurons: number; blocked?: string }
   cache?: { model: string; promptTokens: number; ageSeconds: number; ttlSeconds: number }
+  billing: { billing: Billing; detected: BillingFacts; configured: BillingOption; patience: number }
+  hold?: HoldState
   unavailable: readonly string[]
   logDir: string | undefined
   advancedPath?: string
@@ -112,9 +135,17 @@ export function statusReport(a: StatusArgs): string {
   lines.push(`  decider   ${c.decisionModel} · timeout ${c.timeoutMs} ms · account ${presence(c.accountId)} · token ${presence(c.apiToken)}`)
   const budget = c.dailyNeuronBudget > 0 ? ` of ${c.dailyNeuronBudget} budget` : ""
   lines.push(`  today     ${a.guard.calls} Clef calls · ${kTokens(a.guard.inputTokens)} input tokens · ~${Math.round(a.guard.neurons)} neurons${budget}${a.guard.blocked ? ` · ${a.guard.blocked}` : ""}`)
+  const b = a.billing
+  const source = b.configured === "auto" ? `detected: ${b.detected.why}` : `set in config; detected ${b.detected.billing} (${b.detected.why})`
+  const patience = b.patience === 0 ? "downgrades taken at once" : `downgrade patience ${b.patience}`
+  lines.push(`  billing   ${b.billing} (${source}) · ${patience}`)
   if (a.cache) {
     const warm = a.cache.ageSeconds < a.cache.ttlSeconds
     lines.push(`  cache     ${displayName(a.cache.model)} · ${kTokens(a.cache.promptTokens)} context · ${warm ? `warm (${a.cache.ageSeconds}s of ${a.cache.ttlSeconds}s)` : "cold"}`)
+  }
+  if (a.hold) {
+    const what = a.hold.wanted.model === a.hold.model ? `${a.hold.wanted.effort ?? "lower"} effort` : displayName(a.hold.wanted.model)
+    lines.push(`  deferred  ${what} · ${a.hold.turns} held turn${a.hold.turns === 1 ? "" : "s"} on ${displayName(a.hold.model)} · staying has cost ${dollars(a.hold.spent)} (list prices)`)
   }
   if (a.unavailable.length > 0) lines.push(`  unusable  ${a.unavailable.join(", ")}`)
   for (const p of a.configProblems) lines.push(`  config!   ${p}`)
@@ -181,7 +212,8 @@ export function statsReport(s: Stats, days: number, files: number): string {
   lines.push(`    calls ${s.clefCalls} · ${kTokens(s.clefInputTokens)} input tokens`)
   if (s.latency) lines.push(`    latency mean ${s.latency.mean} ms · p50 ${s.latency.p50} ms · p95 ${s.latency.p95} ms`)
   if (s.meanConfidence !== undefined) lines.push(`    mean probability of Clef's pick ${pct(s.meanConfidence)}`)
-  lines.push(`    recommendation changed by policy: ${s.recommendationChanged} · cache holds: ${s.cacheHolds} · manual overrides: ${s.overrides}`)
+  lines.push(`    recommendation changed by policy: ${s.recommendationChanged} · manual overrides: ${s.overrides}`)
+  lines.push(`    turns held on a warm model: ${s.cacheHolds} · downgrades taken after a hold: ${s.downgradesTaken}`)
   const failures = Object.entries(s.failures)
   if (failures.length > 0) lines.push(`    fallbacks: ${failures.map(([k, v]) => `${k} ${v}`).join(", ")}`)
   const fb = Object.entries(s.feedback)

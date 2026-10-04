@@ -4,6 +4,7 @@
 
 import { isEffort } from "./models.ts"
 import { CLEF_MODELS, type ClefModel } from "./clef.ts"
+import { BILLINGS, type Billing } from "./pricing.ts"
 import { EFFORTS, LEVELS, type Effort, type Level, type ProfileSpec } from "./types.ts"
 
 export const LOW_CONFIDENCE_POLICIES = ["upper-of-top-two", "bump", "hold", "fallback", "obey"] as const
@@ -11,6 +12,9 @@ export type LowConfidencePolicy = (typeof LOW_CONFIDENCE_POLICIES)[number]
 
 export const ANNOUNCE_MODES = ["status", "answer", "both", "off"] as const
 export type AnnounceMode = (typeof ANNOUNCE_MODES)[number]
+
+export const BILLING_OPTIONS = ["auto", ...BILLINGS] as const
+export type BillingOption = "auto" | Billing
 
 export type Config = {
   enabled: boolean
@@ -26,8 +30,13 @@ export type Config = {
   pauseOnNativeChange: boolean
   /** P(follow-up) at or above which a prompt never routes below the last route. */
   followUpThreshold: number
-  /** Hold a warm model on a downgrade when the context is at least this big; 0 = never hold. */
-  cacheHoldMinTokens: number
+  /** How the person pays for Claude; `auto` detects it. Decides what a held downgrade costs. */
+  billing: BillingOption
+  /**
+   * A downgrade off a warm cache is taken once staying has cost this many
+   * times what the switch costs; 0 = take every downgrade at once.
+   */
+  downgradePatience: number
   /** Prompt-cache TTL in minutes; 0 = work it out from the environment. */
   cacheTtlMinutes: number
   maxEffort?: Effort
@@ -55,7 +64,8 @@ export const DEFAULTS = {
   lowConfidencePolicy: "upper-of-top-two" as LowConfidencePolicy,
   fallbackLevel: "standard" as Level,
   followUpThreshold: 0.6,
-  cacheHoldMinTokens: 40_000,
+  billing: "auto" as BillingOption,
+  downgradePatience: 1,
   cacheTtlMinutes: 0,
   dailyNeuronBudget: 9_000,
   maxPromptChars: 6_000,
@@ -120,6 +130,23 @@ function bool(options: Options, key: string, fallback: boolean): boolean {
   if (v === "true") return true
   if (v === "false") return false
   return fallback
+}
+
+/**
+ * `downgrade_patience`, or what the old `cache_hold_min_tokens` meant by 0
+ * (never hold). Its other values have no equivalent: holding now depends on
+ * what staying has cost, not on the context's size.
+ */
+function downgradePatience(options: Options, problems: string[]): number {
+  if (options.downgrade_patience !== undefined) return numIn(options, "downgrade_patience", 0, 100, DEFAULTS.downgradePatience, problems)
+  const old = options.cache_hold_min_tokens
+  if (old === undefined) return DEFAULTS.downgradePatience
+  if (Number(old) === 0) {
+    problems.push("cache_hold_min_tokens is replaced by downgrade_patience; reading 0 as downgrade_patience 0")
+    return 0
+  }
+  problems.push(`cache_hold_min_tokens is replaced by downgrade_patience and ignored; using ${DEFAULTS.downgradePatience}`)
+  return DEFAULTS.downgradePatience
 }
 
 /**
@@ -189,7 +216,8 @@ export function parseConfig(
     lowConfidencePolicy: oneOf(options, "low_confidence_policy", LOW_CONFIDENCE_POLICIES, DEFAULTS.lowConfidencePolicy, problems),
     fallbackLevel: oneOf(options, "fallback_profile", LEVELS, DEFAULTS.fallbackLevel, problems),
     followUpThreshold: numIn(options, "follow_up_threshold", 0, 1, DEFAULTS.followUpThreshold, problems),
-    cacheHoldMinTokens: numIn(options, "cache_hold_min_tokens", 0, 10_000_000, DEFAULTS.cacheHoldMinTokens, problems),
+    billing: oneOf(options, "billing", BILLING_OPTIONS, DEFAULTS.billing, problems),
+    downgradePatience: downgradePatience(options, problems),
     cacheTtlMinutes: numIn(options, "cache_ttl_minutes", 0, 1440, DEFAULTS.cacheTtlMinutes, problems),
     dailyNeuronBudget: numIn(options, "daily_neuron_budget", 0, 1_000_000_000, DEFAULTS.dailyNeuronBudget, problems),
     maxPromptChars: numIn(options, "max_prompt_chars", 200, 200_000, DEFAULTS.maxPromptChars, problems),

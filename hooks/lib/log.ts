@@ -3,7 +3,7 @@
 // left out unless `log_prompts` is on; a short SHA-256 prefix lets repeated
 // prompts be recognised without storing them.
 
-import type { Decision, Effort, Level, Source } from "./types.ts"
+import type { Decision, Deferral, Effort, Level, Source } from "./types.ts"
 
 export const LOG_VERSION = 1
 
@@ -46,6 +46,14 @@ export type TurnRecord = {
   note?: string
   /** What the API said answered, summed over the turn's main-loop requests. */
   answered?: AnsweredUsage
+  /** Cache read and write of the turn's first request: what a model switch, or a return, cost. */
+  firstStep?: { cacheReadTokens: number; cacheWriteTokens: number }
+  /** How the person pays, as the policy saw it. */
+  billing?: "subscription" | "api"
+  /** A downgrade weighed against a warm cache: held, or taken after a held stretch. */
+  deferral?: Deferral
+  /** The plan's rate-limit windows at the start of the turn (subscriptions only). */
+  rateLimits?: { kind: string; percentUsed: number }[]
   steps?: number
   durationMs?: number
   endReason?: string
@@ -77,6 +85,8 @@ export function turnRecord(args: {
   hash?: string
   logPrompts: boolean
   answered?: AnsweredUsage
+  firstStep?: { cacheReadTokens: number; cacheWriteTokens: number }
+  rateLimits?: { kind: string; percentUsed: number }[]
   steps?: number
   durationMs?: number
   endReason?: string
@@ -114,6 +124,10 @@ export function turnRecord(args: {
   if (d.final) record.final = { ...d.final }
   if (d.note) record.note = d.note
   if (args.answered) record.answered = { ...args.answered }
+  if (args.firstStep) record.firstStep = { ...args.firstStep }
+  if (d.billing) record.billing = d.billing
+  if (d.deferral) record.deferral = { ...d.deferral, wanted: { ...d.deferral.wanted } }
+  if (args.rateLimits && args.rateLimits.length > 0) record.rateLimits = args.rateLimits.map((w) => ({ ...w }))
   if (args.steps !== undefined) record.steps = args.steps
   if (args.durationMs !== undefined) record.durationMs = args.durationMs
   if (args.endReason) record.endReason = args.endReason
@@ -150,7 +164,10 @@ export type Stats = {
   meanConfidence: number | undefined
   failures: Record<string, number>
   overrides: number
+  /** Turns held on a warm model instead of the cheaper one Clef's level asked for. */
   cacheHolds: number
+  /** Held stretches that ended in the downgrade being taken. */
+  downgradesTaken: number
   adjusted: number
   /** Turns where Clef's raw level differs from the final route's level. */
   recommendationChanged: number
@@ -181,6 +198,7 @@ export function aggregate(records: readonly LogRecord[]): Stats {
     failures: {},
     overrides: 0,
     cacheHolds: 0,
+    downgradesTaken: 0,
     adjusted: 0,
     recommendationChanged: 0,
     feedback: {},
@@ -212,6 +230,7 @@ export function aggregate(records: readonly LogRecord[]): Stats {
     if (r.failure) bump(stats.failures, r.failure.kind)
     if (r.source === "override" || r.source === "pin") stats.overrides++
     if (r.adjustments.some((a) => a.rule === "cache-hold")) stats.cacheHolds++
+    if (r.deferral && !r.deferral.held) stats.downgradesTaken++
     if (r.adjustments.length > 0) stats.adjusted++
     stats.clefInputTokens += r.clefInputTokens ?? 0
   }

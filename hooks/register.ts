@@ -17,7 +17,7 @@ import type { EngineInterface, PluginOptions, Register } from "claude-code"
 
 import { clefProvider } from "./lib/clef.ts"
 import { parseAdvancedFile, parseConfig, type Config } from "./lib/config.ts"
-import { cacheTtlMs, modelEnvFrom, type EnvValues } from "./lib/env.ts"
+import { cacheTtlMs, detectBilling, modelEnvFrom, type BillingFacts, type EnvValues, type RateLimitWindow } from "./lib/env.ts"
 import {
   HELP,
   answerLine,
@@ -34,7 +34,8 @@ import { blockedReason, estimatedNeurons, normaliseGuard, recordFailure, recordS
 import { aggregate, logFileName, parseLines, promptHash, turnRecord, type AnsweredUsage, type FeedbackRecord } from "./lib/log.ts"
 import { clampEffort, effortsFor, isEffort, sameModel, type ModelEnv } from "./lib/models.ts"
 import { parseCommand, parsePrefix, trackNativeEffort, turnKind, type ClefCommand } from "./lib/overrides.ts"
-import { decide, describe, needsClef, type CacheState, type RouterMode } from "./lib/policy.ts"
+import { decide, describe, needsClef, type CacheState, type HoldState, type RouterMode } from "./lib/policy.ts"
+import { priceOf, stayCost, isOneHour, type Billing } from "./lib/pricing.ts"
 import { DEFAULT_RUBRIC, parseRubric, type Rubric } from "./lib/rubric.ts"
 import type { Decision, ProviderResult, Route, Target } from "./lib/types.ts"
 
@@ -53,6 +54,8 @@ type Persisted = {
   pendingOverride?: Target | "off"
   last?: Route
   cache?: CacheState
+  /** A downgrade held for the cache, and what staying has cost so far. */
+  hold?: HoldState
   unavailable: string[]
   failures: Record<string, number>
   /** The session model Claude Code reported at the last turn. */
@@ -76,6 +79,9 @@ type Run = {
   failedRewrite: boolean
   steps: number
   answered?: AnsweredUsage
+  /** Cache read and write of the turn's first request: what a switch (or a return) cost. */
+  firstStep?: { cacheReadTokens: number; cacheWriteTokens: number }
+  rateLimits?: RateLimitWindow[]
 }
 
 // Module state. `register` runs again on every reload, which resets these;
@@ -86,6 +92,11 @@ let loaded = false
 let config: Config = parseConfig({}).config
 let problems: string[] = []
 let modelEnv: ModelEnv = modelEnvFrom({})
+let env: EnvValues = {}
+let settingsTtl: unknown
+let apiKeyHelper = false
+let detected: BillingFacts = detectBilling({})
+let billing: Billing = detected.billing
 let ttlMs = 5 * 60_000
 let rubric: Rubric = DEFAULT_RUBRIC
 let logDir: string | undefined
@@ -122,6 +133,9 @@ async function readEnv($: EngineInterface): Promise<EnvValues> {
     CLAUDE_CODE_PROMPT_CACHE_TTL: await $.env.get("CLAUDE_CODE_PROMPT_CACHE_TTL"),
     FORCE_PROMPT_CACHING_5M: await $.env.get("FORCE_PROMPT_CACHING_5M"),
     ENABLE_PROMPT_CACHING_1H: await $.env.get("ENABLE_PROMPT_CACHING_1H"),
+    // Only whether they are set: they say a gateway bills per token.
+    ANTHROPIC_AUTH_TOKEN: (await $.env.get("ANTHROPIC_AUTH_TOKEN")) ? "set" : undefined,
+    ANTHROPIC_BASE_URL: (await $.env.get("ANTHROPIC_BASE_URL")) ? "set" : undefined,
   }
 }
 
@@ -141,10 +155,12 @@ async function load($: EngineInterface): Promise<void> {
     )
     config = parsed.config
     problems = [...advanced.problems, ...parsed.problems]
-    const env = await readEnv($)
+    env = await readEnv($)
     modelEnv = modelEnvFrom(env)
     const settings = (await $.settings.read().catch(() => ({}))) as Record<string, unknown>
-    ttlMs = cacheTtlMs(config.cacheTtlMinutes, env, settings.promptCacheTtl)
+    settingsTtl = settings.promptCacheTtl
+    apiKeyHelper = typeof settings.apiKeyHelper === "string" && settings.apiKeyHelper !== ""
+    refreshBilling(undefined)
     if (config.rubricFile) {
       const text = await $.fs.read(config.rubricFile).catch(() => undefined)
       const result = typeof text === "string" ? parseRubric(text) : { problems: [`cannot read rubric_file ${config.rubricFile}`] }
@@ -159,6 +175,17 @@ async function load($: EngineInterface): Promise<void> {
   } catch (error) {
     problems.push(`setup: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+/**
+ * How the person pays and the cache TTL that follows from it, refreshed from
+ * the rate-limit windows each turn: they appear after the session's first
+ * response on a subscription, and a window past 100% means usage credits.
+ */
+function refreshBilling(rateLimits: readonly RateLimitWindow[] | undefined): void {
+  detected = detectBilling(env, { apiKeyHelper, ...(rateLimits ? { rateLimits } : {}) })
+  billing = config.billing === "auto" ? detected.billing : config.billing
+  ttlMs = cacheTtlMs(config.cacheTtlMinutes, env, settingsTtl, detected)
 }
 
 async function readGuard($: EngineInterface, now: number): Promise<GuardState> {
@@ -258,6 +285,8 @@ async function routeTurn($: EngineInterface, turnId: string, text: string): Prom
   const base = { turnId, kind, config, modelEnv, session: state, ...(override ? { override } : {}) }
   const result = needsClef(base) ? await askClef($, text) : undefined
   const usage = await $.session.usage().catch(() => undefined)
+  const rateLimits = usage?.rateLimits?.map((w) => ({ kind: w.kind, percentUsed: w.percentUsed }))
+  refreshBilling(rateLimits)
   const now = await $.clock.now()
   const decision = decide({
     ...base,
@@ -265,6 +294,7 @@ async function routeTurn($: EngineInterface, turnId: string, text: string): Prom
     ...(usage?.context?.tokens ? { contextTokens: usage.context.tokens } : {}),
     now,
     cacheTtlMs: ttlMs,
+    billing,
   })
 
   const kindOfFailure = decision.failure?.kind
@@ -276,7 +306,14 @@ async function routeTurn($: EngineInterface, turnId: string, text: string): Prom
     warnOnce($, `quota-${new Date(now).toISOString().slice(0, 10)}`, "Clef router: Workers AI's free daily allocation is used up; falling back until 00:00 UTC.")
 
   if (decision.final) state.last = decision.final
+  // A held turn carries the stretch on (its cost is added when it completes);
+  // any other turn ends it.
+  const deferral = decision.deferral
+  if (deferral?.held && decision.final) {
+    state.hold = { model: decision.final.model, wanted: deferral.wanted, spent: deferral.spent, turns: deferral.turns }
+  } else delete state.hold
   const run: Run = { decision, prompt: text, passthrough: !decision.final, failedRewrite: false, steps: 0 }
+  if (rateLimits && rateLimits.length > 0) run.rateLimits = rateLimits
   const hash = await promptHash(text).catch(() => undefined)
   if (hash) run.hash = hash
   runs.set(turnId, run)
@@ -359,10 +396,12 @@ async function afterStep(
       cacheReadTokens: a.cacheReadTokens + u.cache_read_input_tokens,
       cacheWriteTokens: a.cacheWriteTokens + u.cache_creation_input_tokens,
     }
+    if (!run.firstStep) run.firstStep = { cacheReadTokens: u.cache_read_input_tokens, cacheWriteTokens: u.cache_creation_input_tokens }
     const cache: CacheState = {
       model: sent.model,
       at: now,
       promptTokens: u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens,
+      caching: u.cache_read_input_tokens + u.cache_creation_input_tokens > 0,
     }
     if (typeof sent.effort === "string" && isEffort(sent.effort)) cache.effort = sent.effort
     state.cache = cache
@@ -370,7 +409,19 @@ async function afterStep(
   await save($)
 }
 
+/** Adds what a held turn cost to its stretch, from the usage the API reported. */
+function accrueHold(run: Run): void {
+  const d = run.decision
+  const hold = state.hold
+  if (!d.deferral?.held || !d.final || !run.answered || !hold || !sameModel(hold.model, run.answered.model)) return
+  const held = priceOf(d.final.model)
+  const wanted = priceOf(d.deferral.wanted.model)
+  if (!held || !wanted) return
+  hold.spent = d.deferral.spent + stayCost(d.deferral.billing, held, wanted, run.answered, isOneHour(ttlMs))
+}
+
 async function completeTurn($: EngineInterface, run: Run, durationMs: number, reason: string): Promise<void> {
+  accrueHold(run)
   const ts = new Date(await $.clock.now()).toISOString()
   const record = turnRecord({
     decision: run.decision,
@@ -380,6 +431,8 @@ async function completeTurn($: EngineInterface, run: Run, durationMs: number, re
     ...(run.hash ? { hash: run.hash } : {}),
     logPrompts: config.logPrompts,
     ...(run.answered ? { answered: run.answered } : {}),
+    ...(run.firstStep ? { firstStep: run.firstStep } : {}),
+    ...(run.rateLimits ? { rateLimits: run.rateLimits } : {}),
     steps: run.steps,
     durationMs,
     endReason: reason,
@@ -389,8 +442,8 @@ async function completeTurn($: EngineInterface, run: Run, durationMs: number, re
   if (row) {
     row.decision = run.decision
     if (run.answered) row.answeredModel = run.answered.model
-    await save($)
   }
+  await save($)
 }
 
 async function registerCommand($: EngineInterface): Promise<void> {
@@ -418,6 +471,7 @@ async function onClear($: EngineInterface): Promise<void> {
   // /clear starts a new conversation: nothing is cached and nothing continues.
   delete state.last
   delete state.cache
+  delete state.hold
   delete state.pendingOverride
   state.history = []
   runs.clear()
@@ -459,6 +513,8 @@ async function statusText($: EngineInterface, now: number): Promise<string> {
           },
         }
       : {}),
+    billing: { billing, detected, configured: config.billing, patience: config.downgradePatience },
+    ...(state.hold ? { hold: state.hold } : {}),
     unavailable: state.unavailable,
     logDir,
     ...(advancedPath ? { advancedPath } : {}),
@@ -489,6 +545,7 @@ async function testText($: EngineInterface, now: number, prompt: string): Promis
     result,
     now,
     cacheTtlMs: ttlMs,
+    billing,
   })
   return [`Clef on: ${prompt.slice(0, 80)}`, ...explain(d), "", "(Not sent to Claude. Counts toward today's Clef usage.)"].join("\n")
 }
@@ -590,6 +647,23 @@ export const register: Register = (on, pluginOptions) => {
     await load($)
     await registerCommand($)
     return next(e)
+  })
+
+  // A compaction replaces the conversation, so the next request writes a new
+  // cache whatever the model: a downgrade then costs nothing to take.
+  on("session.compact", async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined && e.trigger !== "precompute" && result.messages !== undefined) {
+      try {
+        await load($)
+        delete state.cache
+        delete state.hold
+        await save($)
+      } catch {
+        // Bookkeeping only.
+      }
+    }
+    return result
   })
 
   on("session.end", async ($, e, next) => {

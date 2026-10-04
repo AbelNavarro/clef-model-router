@@ -94,7 +94,7 @@ for (const model of models) {
     let labelled = 0
     for (const item of corpus) {
       const result = await provider.decide(item.prompt)
-      const d = decide({ turnId: "cal", kind: "prompt", config, modelEnv: FIRST_PARTY_ENV, session: { mode: "auto", unavailable: [] }, result, now: 0, cacheTtlMs: 0 })
+      const d = decide({ turnId: "cal", kind: "prompt", config, modelEnv: FIRST_PARTY_ENV, session: { mode: "auto", unavailable: [] }, result, now: 0, cacheTtlMs: 0, billing: "subscription" })
       const routed = d.final?.level
       if (!result.ok) {
         failures++

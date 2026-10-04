@@ -39,15 +39,33 @@ type World = {
   clock: ReturnType<typeof mock.clock>
 }
 
-function world(on: On, opts: { clef?: () => unknown; sessionModel?: () => string; stepFails?: (index: number) => boolean } = {}): World {
+type StepUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+
+type WorldOptions = {
+  clef?: () => unknown
+  sessionModel?: () => string
+  stepFails?: (index: number) => boolean
+  /** Token counts each step reports (default: a small, cached request). */
+  usage?: StepUsage
+  /** Context tokens `$.session.usage()` reports (default 30k). */
+  contextTokens?: number
+  /** Rate-limit windows `$.session.usage()` reports (default none: not a subscription). */
+  rateLimits?: { kind: string; percentUsed: number }[]
+  env?: Record<string, string>
+}
+
+function world(on: On, opts: WorldOptions = {}): World {
   const w: World = { steps: [], fetches: [], statuses: [], toasts: [], files: new Map(), clock: mock.clock(on, { now: T0 }) }
   mock.store(on)
-  mock.env(on, { HOME: "/home/test" })
+  mock.env(on, { HOME: "/home/test", ...opts.env })
   on("settings.read", () => ({ value: {} }))
   on("session.start", () => ({ cwd: "/work" }))
   on("session.model", () => ({ value: opts.sessionModel?.() ?? "claude-opus-5-5" }))
   on("session.id", () => ({ value: "sess-1" }))
-  on("session.usage", () => ({ value: { startedAt: T0, context: { tokens: 30_000, window: 1_000_000, percent: 3 }, rateLimits: [] } }))
+  on("session.usage", () => ({
+    value: { startedAt: T0, context: { tokens: opts.contextTokens ?? 30_000, window: 1_000_000, percent: 3 }, rateLimits: opts.rateLimits ?? [] },
+  }))
+  on("session.compact", () => ({ messages: [{ role: "user", text: "Summary of the conversation so far", toolUses: [] }] }))
   on("command.register", () => ({ value: { command: "clef" } }))
   // What the mod adds to the hint line under the prompt (via ui.render).
   on("ui.render", ($, e) => {
@@ -77,7 +95,7 @@ function world(on: On, opts: { clef?: () => unknown; sessionModel?: () => string
       stopReason: failed ? null : "end_turn",
       usage: failed
         ? null
-        : { model: e.model, input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 30_000, cache_creation_input_tokens: 100 },
+        : { model: e.model, ...(opts.usage ?? { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 30_000, cache_creation_input_tokens: 100 }) },
     }
   })
   return w
@@ -293,4 +311,103 @@ test("a reload with credentials replaces a stale 'not configured' status", { opt
   await $.turn.start({ turnId: "t1", text: "Debug the deadlock" })
   await start($)
   expect(await shown($, w)).toBe("Clef → Opus · high · 82%")
+})
+
+/** Clef answers one level per call, in order (then the last one again). */
+function levels(...ls: number[]): () => unknown {
+  let i = 0
+  return () => ({ value: { status: 200, ok: true, headers: {}, text: clefAnswer(ls[Math.min(i++, ls.length - 1)]!, 0.9) } })
+}
+
+async function turn($: Engine, id: string, text: string) {
+  await $.turn.start({ turnId: id, text })
+  await step($, id, 0)
+  await $.turn.complete({ turnId: id, answer: "done", durationMs: 1000, isAborted: false, reason: "answer" } as never)
+}
+
+// Each turn reads 300k from cache (a few steps over a 30k context): on Opus
+// 5.5 that is $0.06 of reads. A switch writes 30k to the new model's cache.
+const BUSY = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 300_000, cache_creation_input_tokens: 100 }
+const PLAN = [{ kind: "five_hour", percentUsed: 12 }, { kind: "seven_day", percentUsed: 40 }]
+
+test("on a subscription, a downgrade off a warm Opus cache is held briefly, then taken", { options: CREDS }, async ($, on) => {
+  const w = world(on, { clef: levels(3, 1, 1, 1), usage: BUSY, rateLimits: PLAN })
+  await start($)
+  await turn($, "t1", "Debug the intermittent deadlock")
+  await turn($, "t2", "Rename the helper")
+  expect(await shown($, w)).toBe("Clef → Opus · low · 90% (Sonnet deferred)")
+  await turn($, "t3", "Update the changelog")
+  await turn($, "t4", "Fix the docstring")
+  // A switch to Sonnet costs 30k × $4 (one-hour write) = $0.12; two held
+  // turns on Opus cost about $0.122 of plan usage.
+  expect(w.steps.map((s) => `${s.model}:${String(s.effort)}`)).toEqual([
+    "claude-opus-5-5:high",
+    "claude-opus-5-5:low",
+    "claude-opus-5-5:low",
+    "claude-sonnet-5-5:low",
+  ])
+  const status = (await $.command.run({ command: "clef", args: "" } as never)) as { text: string }
+  expect(status.text).toMatch(/billing\s+subscription \(detected: the plan's rate limits are reported\)/)
+  expect(status.text).toMatch(/downgrade Sonnet taken after 2 held turns/)
+})
+
+test("with an API key, Opus 5.5 stays for Sonnet-level work: their cache reads cost the same", { options: CREDS }, async ($, on) => {
+  const w = world(on, { clef: levels(3, 1, 1, 1), usage: BUSY, env: { ANTHROPIC_API_KEY: "sk-test" } })
+  await start($)
+  for (const [id, text] of [["t1", "Debug the deadlock"], ["t2", "Rename the helper"], ["t3", "Update the changelog"], ["t4", "Fix the docstring"]] as const) {
+    await turn($, id, text)
+  }
+  expect(w.steps.map((s) => `${s.model}:${String(s.effort)}`)).toEqual([
+    "claude-opus-5-5:high",
+    "claude-opus-5-5:low",
+    "claude-opus-5-5:low",
+    "claude-opus-5-5:low",
+  ])
+  const status = (await $.command.run({ command: "clef", args: "" } as never)) as { text: string }
+  expect(status.text).toMatch(/billing\s+api \(detected: an API key is set\)/)
+  expect(status.text).toMatch(/deferred\s+Sonnet · 3 held turns on Opus/)
+})
+
+test("billing set in the config wins over what was detected", { options: { ...CREDS, billing: "subscription" } }, async ($, on) => {
+  const w = world(on, { clef: levels(3, 1, 1, 1), usage: BUSY, env: { ANTHROPIC_API_KEY: "sk-test" } })
+  await start($)
+  await turn($, "t1", "Debug the deadlock")
+  await turn($, "t2", "Rename the helper")
+  await turn($, "t3", "Update the changelog")
+  await turn($, "t4", "Fix the docstring")
+  // Detected as API, Opus 5.5 would stay (see above). Counted as a subscription,
+  // the switch (30k × $2.50: an API key means a five-minute cache) is taken
+  // once two held turns have cost more than its $0.075.
+  expect(w.steps.map((s) => s.model)).toEqual(["claude-opus-5-5", "claude-opus-5-5", "claude-opus-5-5", "claude-sonnet-5-5"])
+  const status = (await $.command.run({ command: "clef", args: "" } as never)) as { text: string }
+  expect(status.text).toMatch(/billing\s+subscription \(set in config; detected api/)
+})
+
+test("after a compaction a downgrade is taken at once: the next request writes a new cache anyway", { options: CREDS }, async ($, on) => {
+  const w = world(on, { clef: levels(3, 0), usage: BUSY, rateLimits: PLAN })
+  await start($)
+  await turn($, "t1", "Debug the deadlock")
+  const transcript = [
+    { role: "user", text: "Debug the deadlock", toolUses: [] },
+    { role: "assistant", text: "Found it", toolUses: [] },
+  ]
+  await $.session.compact({ trigger: "manual", messages: transcript } as never)
+  await turn($, "t2", "List the files in src")
+  expect(w.steps[1]!.model).toBe("claude-haiku-4-5")
+})
+
+test("the log records billing, the deferral, the first request's cache use and the plan windows", { options: CREDS }, async ($, on) => {
+  const w = world(on, { clef: levels(3, 1), usage: BUSY, rateLimits: PLAN })
+  await start($)
+  await turn($, "t1", "Debug the deadlock")
+  await turn($, "t2", "Rename the helper")
+  const [, text] = [...w.files.entries()].find(([p]) => p.includes("routing-"))!
+  const [first, second] = text.trim().split("\n").map((l) => JSON.parse(l))
+  expect(first.billing).toBe("subscription")
+  expect(first.firstStep).toEqual({ cacheReadTokens: 300_000, cacheWriteTokens: 100 })
+  expect(first.rateLimits).toEqual(PLAN)
+  expect(first.deferral).toBeUndefined()
+  expect(second.deferral.held).toBe(true)
+  expect(second.deferral.wanted.model).toBe("claude-sonnet-5-5")
+  expect(second.adjustments.map((a: { rule: string }) => a.rule)).toEqual(["cache-hold"])
 })

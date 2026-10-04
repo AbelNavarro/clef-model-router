@@ -3,6 +3,7 @@ import { describe, test } from "node:test"
 
 import { profilesReport, statusLine, statusReport, historyReport, explain } from "../hooks/lib/format.ts"
 import { aggregate, logFileName, parseLines, promptHash, turnRecord } from "../hooks/lib/log.ts"
+import { detectBilling } from "../hooks/lib/env.ts"
 import { FIRST_PARTY_ENV } from "../hooks/lib/models.ts"
 import { decide } from "../hooks/lib/policy.ts"
 import { presence, redact } from "../hooks/lib/redact.ts"
@@ -27,6 +28,7 @@ describe("redaction", () => {
       modelEnv: FIRST_PARTY_ENV,
       mode: "auto",
       guard: { calls: 0, inputTokens: 0, neurons: 0 },
+      billing: { billing: "subscription", detected: detectBilling({}), configured: "auto", patience: 1 },
       unavailable: [],
       logDir: "/tmp/x",
     })
@@ -94,7 +96,8 @@ describe("display", () => {
       "Clef ✕ timeout → Sonnet · medium",
     )
     const warm = { model: "claude-opus-5-5", effort: "high" as const, at: 1_000_000 - 1000, promptTokens: 100_000 }
-    assert.equal(statusLine(decide(input({ result: ok(rec("trivial", 0.9)), session: session({ cache: warm }) }))), "Clef → Opus · high · 90% (held for cache)")
+    // A held downgrade names what it held back, and the effort still comes down.
+    assert.equal(statusLine(decide(input({ result: ok(rec("trivial", 0.9)), session: session({ cache: warm }) }))), "Clef → Opus · low · 90% (Haiku deferred)")
     assert.equal(statusLine(decide(input({ override: { model: "opus", effort: "max" } }))), "+ Opus · max")
     assert.equal(statusLine(decide(input({ session: session({ mode: "off" }) }))), "Clef off")
   })
@@ -103,7 +106,8 @@ describe("display", () => {
     const warm = { model: "claude-opus-5-5", effort: "high" as const, at: 1_000_000 - 1000, promptTokens: 100_000 }
     const lines = explain(decide(input({ result: ok(rec("trivial", 0.9)), session: session({ cache: warm }) }))).join("\n")
     assert.match(lines, /trivial .*90%.*← Clef/)
-    assert.match(lines, /cache-hold: Haiku → Opus · high/)
+    assert.match(lines, /cache-hold: Haiku → Opus · low/)
+    assert.match(lines, /downgrade Haiku deferred \(held turn 1\): staying has cost \$0 so far, a switch costs \$0\.13 now \(subscription, list prices\)/)
   })
 
   test("history and profiles render", () => {

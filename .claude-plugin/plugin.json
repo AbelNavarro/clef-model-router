@@ -46,6 +46,17 @@
       "description": "model[:effort] for the five difficulty levels, lowest first: trivial, simple, standard, hard, deep. Aliases (haiku, sonnet, opus, fable) or full model IDs.",
       "default": "haiku, sonnet:low, sonnet:medium, opus:high, opus:xhigh"
     },
+    "billing": {
+      "type": "string",
+      "title": "Billing",
+      "description": "How you pay for Claude, which decides when a cheaper model is worth leaving a warm cache for. auto: detected (a subscription reports plan rate limits; an API key, cloud provider or gateway bills per token). subscription: move to the cheaper model after a short stretch, saving the stronger model's allowance. api: stay while that is cheaper in dollars.",
+      "options": [
+        "auto",
+        "subscription",
+        "api"
+      ],
+      "default": "auto"
+    },
     "announce": {
       "type": "string",
       "title": "Show the route",

@@ -35,14 +35,14 @@ Check the endpoint outside Claude Code with `npm run smoke` (credentials in the 
 
 ## The route looks wrong
 
-- `/clef` shows Clef's full distribution and every policy change. A route marked `(unsure)` came from the confidence policy, `(held for cache)` from the cache hold, `(follow-up)` from the follow-up floor.
+- `/clef` shows Clef's full distribution and every policy change. A route marked `(unsure)` came from the confidence policy, `(Sonnet deferred)` from a downgrade held off a warm cache, `(follow-up)` from the follow-up floor.
 - **One turn:** start the next prompt with `+opus:high`, or another target.
 - **Persistently:** add those prompts to a corpus and run `npm run calibrate`. Then adjust the rubric or `profiles`; see [Calibration](CALIBRATION.md).
 - Report it with `/clef feedback under` or `over`, so `/clef stats` can show the trend.
 
 ## It keeps a model I expected it to leave
 
-That is the cache hold. A large warm conversation is cheaper to continue on its model than to re-read uncached on a cheaper one. `/clef` shows the cache size and age. To change this, set `cache_hold_min_tokens` (`0` disables holding), or start fresh with `/clear`.
+That is a deferred downgrade, shown as `(Sonnet deferred)`. Moving a warm conversation to another model writes it all again, so the router stays until staying has cost what the switch costs, then moves. With an API key this can take many turns: Opus 5.5 and Sonnet 5.5 cost the same to re-read. `/clef` shows the billing mode, what staying has cost so far, and what the switch costs. To change it, set `billing`, or `downgrade_patience` (`0` takes every downgrade at once), or start fresh with `/clear`. See [Routing, prompt caching and cost](COSTS.md).
 
 ## `Clef paused (you chose /model)`
 

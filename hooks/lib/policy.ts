@@ -12,7 +12,9 @@
 //   6. A follow-up never routes below the route it follows
 //   7. A profile whose model is unavailable → the nearest available one, upward first
 //   8. A context too big for the model's window → the nearest profile that fits
-//   9. A downgrade that would throw away a large warm prompt cache → hold the model
+//   9. A downgrade off a warm prompt cache → held until staying has cost what
+//      switching costs, in the unit the person's billing makes scarce
+//      (docs/adr/0001-downgrade-timing-by-billing-mode.md)
 //  10. Effort is capped and clamped to what the model takes
 
 import type { Config } from "./config.ts"
@@ -21,12 +23,14 @@ import {
   clampEffort,
   displayName,
   effortChangeKeepsCache,
+  effortsFor,
   rankOf,
   resolveModel,
   sameModel,
   windowOf,
   type ModelEnv,
 } from "./models.ts"
+import { dollars, isOneHour, priceOf, switchCost, type Billing } from "./pricing.ts"
 import {
   EFFORTS,
   LEVELS,
@@ -51,6 +55,23 @@ export type CacheState = {
   at: number
   /** Input + cache read + cache write tokens of that request. */
   promptTokens: number
+  /**
+   * Whether the API reported any cache read or write for it. False where
+   * nothing is cached (a gateway that strips cache markers): there is then no
+   * cache to keep. Absent in state saved by earlier versions: assumed true.
+   */
+  caching?: boolean
+}
+
+/** A stretch of held downgrades: what staying on the warm model has cost so far. */
+export type HoldState = {
+  /** The model held, whose cache is warm. */
+  model: string
+  /** What Clef's level asked for on the last held turn; a continuation weighs it again. */
+  wanted: Route
+  /** List-price dollars staying has cost over the stretch's completed turns. */
+  spent: number
+  turns: number
 }
 
 export type PolicySession = {
@@ -58,6 +79,7 @@ export type PolicySession = {
   pin?: Target
   last?: Route
   cache?: CacheState
+  hold?: HoldState
   /** Models that failed when routed to this session. */
   unavailable: readonly string[]
 }
@@ -76,6 +98,8 @@ export type PolicyInput = {
   contextTokens?: number
   now: number
   cacheTtlMs: number
+  /** How the person pays: what a held downgrade costs them. */
+  billing: Billing
 }
 
 /** Headroom kept under a model's window for the reply and tool results. */
@@ -94,7 +118,7 @@ export function describe(route: Route | undefined): string {
  * Whether the policy should ask Clef at all for this turn. Explicit choices,
  * continuations and a disabled router make no network call.
  */
-export function needsClef(input: Omit<PolicyInput, "result" | "now" | "cacheTtlMs" | "contextTokens">): boolean {
+export function needsClef(input: Omit<PolicyInput, "result" | "now" | "cacheTtlMs" | "contextTokens" | "billing">): boolean {
   const { config, session, override, kind } = input
   if (!config.enabled || override === "off") return false
   if (override && (override.level || override.model)) return false
@@ -150,6 +174,20 @@ function routeForTarget(target: Target, input: PolicyInput, adjustments: Adjustm
   return undefined
 }
 
+/**
+ * The effort a turn held on its warm model runs at. Where an effort change
+ * keeps the cache, it still comes down to what Clef's level asked for, and a
+ * level whose model takes no effort (Haiku) gets the held model's lowest: the
+ * turn is held for the cache, not for more thinking. Elsewhere the cached
+ * effort stays, since changing it would cost the cache the hold is keeping.
+ */
+function heldEffort(route: Route, cache: CacheState, env: ModelEnv): Effort | undefined {
+  if (!effortChangeKeepsCache(cache.model, env)) return cache.effort
+  if (route.effort) return route.effort
+  if (effortsFor(route.model) === null) return effortsFor(cache.model)?.[0] ?? "low"
+  return undefined
+}
+
 /** The more capable of the two most probable levels. */
 function upperOfTopTwo(probabilities: Record<Level, number>, top: Level): Level {
   let second: Level | undefined
@@ -190,9 +228,11 @@ export function decide(input: PolicyInput): Decision {
     if (!route) return disabled(explicitSource, `cannot resolve ${explicit.model ?? explicit.level} here`)
     proposed = { ...route }
   } else if (kind !== "prompt" && session.last) {
-    // 3. Continuation.
+    // 3. Continuation. One that continues a held turn weighs the deferred
+    // downgrade again (step 9), so a run of go-aheads cannot outlast it.
     source = "continuation"
-    route = { ...session.last }
+    const hold = session.hold && sameModel(session.last.model, session.hold.model) ? session.hold : undefined
+    route = { ...(hold ? hold.wanted : session.last) }
     proposed = { ...route }
     note = kind === "go-ahead" ? "go-ahead continues the last route" : `${kind} continues the last route`
   } else if ((kind === "notification" || kind === "empty") && !session.last) {
@@ -294,42 +334,52 @@ export function decide(input: PolicyInput): Decision {
     }
   }
 
-  // 9. Cache hold: only for routes the router chose itself.
+  // 9. A downgrade off a warm cache, for routes the router chose itself. Each
+  // model has its own prompt cache, so moving a conversation writes all of it
+  // again. That pays off over a stretch of cheaper turns, not over one: the
+  // downgrade is held while what staying has cost so far is less than what the
+  // switch costs now (times downgrade_patience), then taken. Short dips stay
+  // put; long stretches move. What "cost" means depends on the billing.
   const cache = session.cache
-  if ((source === "clef" || source === "continuation") && cache && config.cacheHoldMinTokens > 0) {
-    const warm = input.now - cache.at < input.cacheTtlMs
-    const big = cache.promptTokens >= config.cacheHoldMinTokens
+  const warm = cache !== undefined && input.now - cache.at < input.cacheTtlMs
+  if ((source === "clef" || source === "continuation") && cache && warm && cache.caching !== false && !isUnavailable(cache.model, session)) {
     const fromRank = rankOf(cache.model)
     const toRank = rankOf(route.model)
-    if (warm && big && !isUnavailable(cache.model, session)) {
-      const ago = Math.round((input.now - cache.at) / 1000)
-      if (fromRank !== undefined && toRank !== undefined && toRank < fromRank) {
-        const keepsCache = effortChangeKeepsCache(cache.model, input.modelEnv)
+    const modelDown = fromRank !== undefined && toRank !== undefined && toRank < fromRank
+    const effortDown =
+      !modelDown &&
+      sameModel(route.model, cache.model) &&
+      route.effort !== undefined &&
+      cache.effort !== undefined &&
+      EFFORTS.indexOf(route.effort) < EFFORTS.indexOf(cache.effort) &&
+      !effortChangeKeepsCache(cache.model, input.modelEnv)
+    // An effort change that breaks the cache rewrites it on the same model.
+    const toPrice = priceOf(modelDown ? route.model : cache.model)
+    if ((modelDown || effortDown) && toPrice) {
+      const tokens = input.contextTokens ?? cache.promptTokens
+      const cost = switchCost(toPrice, tokens, isOneHour(input.cacheTtlMs))
+      const prior = session.hold && sameModel(session.hold.model, cache.model) ? session.hold : undefined
+      const spent = prior?.spent ?? 0
+      const turns = prior?.turns ?? 0
+      const wanted: Route = { ...route }
+      const billing = input.billing
+      if (spent >= cost * config.downgradePatience) {
+        if (prior) decision.deferral = { wanted, from: cache.model, billing, spent, cost, turns, held: false }
+      } else {
         const held: Route = { model: cache.model }
         if (route.level) held.level = route.level
-        const effort = keepsCache ? (route.effort ?? cache.effort) : cache.effort
+        const effort = modelDown ? heldEffort(route, cache, input.modelEnv) : cache.effort
         if (effort) held.effort = effort
+        const sofar = `staying has cost ${dollars(spent)} so far (${billing}, list prices)`
         adjustments.push({
           rule: "cache-hold",
           from: describe(route),
           to: describe(held),
-          reason: `${kTokens(cache.promptTokens)} context is cached on ${displayName(cache.model)} (${ago}s ago); ${displayName(route.model)} would re-read it uncached`,
+          reason: modelDown
+            ? `${kTokens(tokens)} context is cached on ${displayName(cache.model)}; moving to ${displayName(route.model)} writes it again (${dollars(cost)}); ${sofar}`
+            : `changing effort on ${displayName(cache.model)} here rewrites its ${kTokens(tokens)} cached context (${dollars(cost)}); ${sofar}`,
         })
-        route = held
-      } else if (
-        sameModel(route.model, cache.model) &&
-        route.effort &&
-        cache.effort &&
-        EFFORTS.indexOf(route.effort) < EFFORTS.indexOf(cache.effort) &&
-        !effortChangeKeepsCache(cache.model, input.modelEnv)
-      ) {
-        const held: Route = { ...route, effort: cache.effort }
-        adjustments.push({
-          rule: "cache-hold",
-          from: describe(route),
-          to: describe(held),
-          reason: `changing effort on ${displayName(cache.model)} here invalidates the ${kTokens(cache.promptTokens)} cached context`,
-        })
+        decision.deferral = { wanted, from: cache.model, billing, spent, cost, turns: turns + 1, held: true }
         route = held
       }
     }
@@ -367,7 +417,7 @@ export function decide(input: PolicyInput): Decision {
     else delete route.effort
   }
 
-  const out: Decision = { ...decision, source, final: route }
+  const out: Decision = { ...decision, source, final: route, billing: input.billing }
   if (proposed) out.proposed = proposed
   if (note) out.note = note
   return out

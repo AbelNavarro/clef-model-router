@@ -15,6 +15,7 @@ An invalid value never stops the mod. It falls back to the default, and `/clef` 
 | `cloudflare_api_token` | (none) | A Workers AI API token. **Sensitive**: masked on entry, stored in your system's secure credential store, never in `settings.json`. Falls back to `$CLOUDFLARE_API_TOKEN`. |
 | `decision_model` | `clef-flash` | `clef-flash` ($0.09 per million input tokens; ~40 ms model time, ~0.3–0.5 s end to end) or `clef` ($0.24 per million; ~210 ms model time). |
 | `profiles` | `haiku, sonnet:low, sonnet:medium, opus:high, opus:xhigh` | What each difficulty level runs on, lowest first: trivial, simple, standard, hard, deep. Each entry is `model[:effort]`, where model is an alias (`haiku`, `sonnet`, `opus`, `fable`) or a full model ID. With no effort, the turn keeps the effort Claude Code would send (Haiku takes none). |
+| `billing` | `auto` | How you pay for Claude: `auto`, `subscription` or `api`. It decides when a cheaper model is worth leaving a warm cache for. `auto` uses the plan's rate-limit windows (reported only on a subscription), then the environment (`ANTHROPIC_API_KEY`, `apiKeyHelper`, a cloud provider or a gateway mean `api`). See [Routing, prompt caching and cost](COSTS.md). |
 | `announce` | `status` | `status`: dimmed at the end of the hint line under the prompt (terminal only). `answer`: a line under each answer. `both`, or `off`. |
 | `enabled` | `true` | Off: the mod stays loaded but leaves every request alone. |
 | `log_prompts` | `false` | Write each prompt's text into the local log. Off: only a hash and the length. |
@@ -39,7 +40,7 @@ A JSON object; every key is optional.
   "low_confidence_policy": "upper-of-top-two",
   "fallback_profile": "standard",
   "follow_up_threshold": 0.6,
-  "cache_hold_min_tokens": 40000,
+  "downgrade_patience": 1,
   "cache_ttl_minutes": 0,
   "max_effort": "none",
   "timeout_ms": 1500,
@@ -58,8 +59,8 @@ A JSON object; every key is optional.
 | `low_confidence_policy` | `upper-of-top-two` | `upper-of-top-two`: the more capable of Clef's two likeliest levels. `bump`: one level up. `hold`: the last turn's level, or the fallback. `fallback`: `fallback_profile`. `obey`: Clef's pick anyway. |
 | `fallback_profile` | `standard` | Used when Clef cannot answer, never below the previous turn's level. |
 | `follow_up_threshold` | `0.6` | When Clef rates a prompt a follow-up at least this likely, the route never drops below the turn it follows. |
-| `cache_hold_min_tokens` | `40000` | On a downgrade, keep the current model when at least this many tokens are cached and the cache is warm. `0` never holds. |
-| `cache_ttl_minutes` | `0` | Prompt-cache lifetime used to judge "warm". `0` resolves it as Claude Code does: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, the `promptCacheTtl` setting, `ENABLE_PROMPT_CACHING_1H`, then 60 minutes on a subscription or 5 with an API key or cloud provider. |
+| `downgrade_patience` | `1` | A downgrade off a warm cache is held until staying has cost this many times what the switch costs, then taken. `0` takes every downgrade at once. It replaces `cache_hold_min_tokens`. |
+| `cache_ttl_minutes` | `0` | Prompt-cache lifetime used to judge "warm". `0` resolves it as Claude Code does: `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL`, the `promptCacheTtl` setting, `ENABLE_PROMPT_CACHING_1H`, then 60 minutes on a subscription within its included usage, or 5 otherwise. |
 | `max_effort` | `none` | Never route above this effort (`low` … `max`). |
 | `timeout_ms` | `1500` | How long to wait for Clef before using the fallback. |
 | `daily_neuron_budget` | `9000` | Stop calling Clef once this many neurons (estimated) are used today, UTC. Workers AI's free allocation is 10,000. `0` means no local limit. |
@@ -90,7 +91,7 @@ These always apply last, to every route:
 
 - a model that is unavailable or failed this session is skipped, moving upward first;
 - a context too big for the model's window moves to a profile that fits;
-- a cache hold, for routes the router chose itself only;
+- a downgrade off a warm cache, held until staying has cost what switching costs, for routes the router chose itself only;
 - the `max_effort` cap, and clamping effort to what the model supports.
 
 Subagents are never routed; they keep their own model.
@@ -105,7 +106,8 @@ Choices made at launch (`claude --model opus`, `--effort high`) are the baseline
 | `CLEF_ROUTER_CONFIG` | Path of the advanced file. |
 | `CLEF_ROUTER_API_BASE` | Base URL instead of `https://api.cloudflare.com/client/v4`, for a proxy or a Clef-compatible endpoint. The path `/accounts/{id}/ai/run/@cf/cloudflare/{model}` is appended. Your token is sent to this URL, so set it only to a host you trust. |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` … `_FABLE_MODEL` | Claude Code's own alias pins, honoured when resolving profile aliases. |
-| `CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` / `_FOUNDRY` | On these providers, unpinned aliases do not resolve. Use full model IDs in `profiles`, or set the `ANTHROPIC_DEFAULT_*_MODEL` variables. |
+| `CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` / `_FOUNDRY` | On these providers, unpinned aliases do not resolve. Use full model IDs in `profiles`, or set the `ANTHROPIC_DEFAULT_*_MODEL` variables. They also mean per-token billing for `billing: auto`. |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` | Read only for whether they are set, never their value: any of them means per-token billing for `billing: auto` when no plan rate limits are reported. |
 
 ## Third-party providers
 

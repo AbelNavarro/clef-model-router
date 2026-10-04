@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- **Downgrades off a warm cache are timed by what staying costs, not held for as long as the cache is warm.** The previous rule held every downgrade once 40k tokens were cached, which in practice kept the strongest model used so far for the rest of the session. A downgrade is now held while staying has cost less than the switch would, summed over the stretch, and then taken. See [ADR 0001](docs/adr/0001-downgrade-timing-by-billing-mode.md) and [docs/COSTS.md](docs/COSTS.md).
+- A held turn runs at the effort Clef's level asked for. A trivial prompt held on Opus runs at `low`, not at the previous turn's effort.
+- The route line names what a hold deferred, for example `(Sonnet deferred)`.
+- `cache_hold_min_tokens` is replaced by `downgrade_patience`. `0` still turns holding off; other values are ignored and reported.
+
+### Added
+
+- `billing` option (`auto`, `subscription`, `api`). Auto-detection reads the plan's rate-limit windows, which are reported only on a subscription, and falls back to the environment. On a subscription, downgrades are taken sooner, to save the stronger model's allowance. Past the plan's included usage, the API rules apply.
+- A compaction makes a downgrade free, so it is taken at once.
+- Log fields `billing`, `deferral`, `firstStep` and `rateLimits`. `/clef` shows the billing mode, how it was detected, and any deferred downgrade.
+
 ## [0.1.4] - 2026-10-04
 
 ### Changed

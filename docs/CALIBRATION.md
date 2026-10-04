@@ -102,7 +102,7 @@ Two signals accumulate in your local log as you work:
 
 - turns by model, effort, profile and source
 - Clef latency (mean, p50, p95) and the mean probability of Clef's pick
-- how often policy changed Clef's pick, cache holds, manual overrides, fallbacks by cause
+- how often policy changed Clef's pick, turns held on a warm model and downgrades taken after a hold, manual overrides, fallbacks by cause
 - your feedback counts
 
 ## The log format
@@ -132,6 +132,10 @@ There is one file per UTC day and session: `~/.claude/plugins/data/clef-model-ro
 | `failure` | When Clef did not answer: `{ kind, message, status? }`. The kind is `timeout`, `network`, `auth`, `quota`, `budget`, `rate-limited`, `server`, `bad-request`, `malformed`, `not-configured` or `circuit-open` |
 | `note` | A human-readable reason for a fallback, continuation or unrouted turn |
 | `answered` | What the Claude API reported, summed over the turn's main-loop requests: `{ model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }` |
+| `firstStep` | Cache read and write of the turn's first request: `{ cacheReadTokens, cacheWriteTokens }`. After a model change, this is what the switch (or the return) cost |
+| `billing` | `subscription` or `api`, as the policy saw it (detected, or set with `billing`) |
+| `deferral` | A downgrade weighed against a warm cache: `{ wanted, from, billing, spent, cost, turns, held }`. `held: true` stayed on `from`; `held: false` took the downgrade after `turns` held turns. `spent` and `cost` are list-price dollars. See [Routing, prompt caching and cost](COSTS.md) |
+| `rateLimits` | The plan's rate-limit windows at the start of the turn, `[{ kind, percentUsed }]`. Subscriptions only |
 | `steps`, `durationMs`, `endReason` | Model requests in the turn, wall time, and `answer`, `aborted`, `refusal` or `error` |
 
 ### Feedback records (`"type": "feedback"`), written by `/clef feedback`
@@ -149,7 +153,8 @@ There is one file per UTC day and session: `~/.claude/plugins/data/clef-model-ro
 - **Did I override it?** Within a session, records are in time order. A `source: "override"` turn straight after a `clef` turn is a manual correction of that turn.
 - **Is 55% the right threshold?** `recommendation.probabilities` is complete, so the policy can be replayed offline at any threshold and compared with your verdicts.
 - **What did policy change, and why?** `proposed` vs `final`, plus `adjustments`.
-- **Did a route cost cache?** `answered.cacheReadTokens` vs `cacheWriteTokens`.
+- **Did a route cost cache?** `answered.cacheReadTokens` vs `cacheWriteTokens`, and `firstStep` for the turn's first request.
+- **Did holding a downgrade pay?** Follow `deferral` across a session's turns: how long stretches last, how they end, and whether the plan's `rateLimits` move faster or slower than under `downgrade_patience: 0`.
 
 For classifying *which kinds* of tasks Clef gets wrong, the prompt text matters. Turn on `log_prompts` while you collect calibration data. The log never leaves your machine.
 

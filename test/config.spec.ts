@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, test } from "node:test"
 
 import { DEFAULTS, parseAdvancedFile, parseConfig, parseProfile, splitTarget } from "../hooks/lib/config.ts"
-import { cacheTtlMs, modelEnvFrom } from "../hooks/lib/env.ts"
+import { cacheTtlMs, detectBilling, modelEnvFrom } from "../hooks/lib/env.ts"
 
 describe("profiles", () => {
   test("model and optional effort", () => {
@@ -104,5 +104,61 @@ describe("environment", () => {
     assert.equal(cacheTtlMs(0, { FORCE_PROMPT_CACHING_5M: "1", CLAUDE_CODE_PROMPT_CACHE_TTL: "1h" }), 5 * 60_000)
     assert.equal(cacheTtlMs(0, { ANTHROPIC_API_KEY: "set", ENABLE_PROMPT_CACHING_1H: "1" }), 60 * 60_000)
     assert.equal(cacheTtlMs(15, { FORCE_PROMPT_CACHING_5M: "1" }), 15 * 60_000)
+  })
+
+  test("a subscription past its included usage drops to the five-minute TTL", () => {
+    const over = detectBilling({}, { rateLimits: [{ kind: "five_hour", percentUsed: 100 }] })
+    assert.equal(cacheTtlMs(0, {}, undefined, over), 5 * 60_000)
+    assert.equal(cacheTtlMs(0, {}, "1h", over), 60 * 60_000)
+  })
+})
+
+describe("billing detection", () => {
+  test("the plan's rate-limit windows mean a subscription, whatever the environment says", () => {
+    const facts = detectBilling({ ANTHROPIC_API_KEY: "set" }, { rateLimits: [{ kind: "five_hour", percentUsed: 12 }, { kind: "seven_day", percentUsed: 40 }] })
+    assert.equal(facts.billing, "subscription")
+    assert.equal(facts.overage, false)
+  })
+
+  test("a window at 100% or more means usage credits, billed per token", () => {
+    const facts = detectBilling({}, { rateLimits: [{ kind: "five_hour", percentUsed: 30 }, { kind: "seven_day", percentUsed: 100 }] })
+    assert.equal(facts.billing, "api")
+    assert.equal(facts.overage, true)
+  })
+
+  test("without windows, the environment decides", () => {
+    assert.equal(detectBilling({}).billing, "subscription")
+    assert.equal(detectBilling({}, { rateLimits: [] }).billing, "subscription")
+    assert.equal(detectBilling({ ANTHROPIC_API_KEY: "set" }).billing, "api")
+    assert.equal(detectBilling({}, { apiKeyHelper: true }).billing, "api")
+    assert.equal(detectBilling({ CLAUDE_CODE_USE_VERTEX: "1" }).billing, "api")
+    assert.equal(detectBilling({ ANTHROPIC_BASE_URL: "set" }).billing, "api")
+    assert.equal(detectBilling({}, { rateLimits: [{ kind: "spend_limit", percentUsed: 5 }] }).billing, "api")
+  })
+})
+
+describe("billing and downgrade options", () => {
+  test("billing is auto by default, or set", () => {
+    assert.equal(parseConfig({}).config.billing, "auto")
+    assert.equal(parseConfig({ billing: "api" }).config.billing, "api")
+    const bad = parseConfig({ billing: "free" })
+    assert.equal(bad.config.billing, "auto")
+    assert.match(bad.problems[0]!, /billing must be one of auto, subscription, api/)
+  })
+
+  test("downgrade_patience defaults to 1 and takes 0", () => {
+    assert.equal(parseConfig({}).config.downgradePatience, 1)
+    assert.equal(parseConfig({ downgrade_patience: 0 }).config.downgradePatience, 0)
+    assert.equal(parseConfig({ downgrade_patience: 2.5 }).config.downgradePatience, 2.5)
+  })
+
+  test("the old cache_hold_min_tokens: 0 still turns holding off; other values are reported", () => {
+    const off = parseConfig({ cache_hold_min_tokens: 0 })
+    assert.equal(off.config.downgradePatience, 0)
+    assert.match(off.problems[0]!, /replaced by downgrade_patience/)
+    const other = parseConfig({ cache_hold_min_tokens: 40000 })
+    assert.equal(other.config.downgradePatience, 1)
+    assert.match(other.problems[0]!, /ignored/)
+    assert.equal(parseConfig({ cache_hold_min_tokens: 0, downgrade_patience: 3 }).config.downgradePatience, 3)
   })
 })

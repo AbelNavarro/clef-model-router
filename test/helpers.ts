@@ -36,6 +36,7 @@ export function input(extra: Partial<PolicyInput> = {}): PolicyInput {
     session: session(),
     now: 1_000_000,
     cacheTtlMs: 5 * 60_000,
+    billing: "subscription",
     ...extra,
   }
 }

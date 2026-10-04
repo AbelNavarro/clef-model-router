@@ -10,7 +10,7 @@
                           ├── explicit choice or continuation?  → no Clef call
                           ├── guard: budget, quota, circuit breaker → may skip the call
                           ├── Clef (one HTTPS request, timeout 1.5 s) → Recommendation
-                          └── policy(recommendation, session, overrides, cache) → Decision
+                          └── policy(recommendation, session, overrides, cache, billing) → Decision
                  │
                  ▼
              turn.step ×N  (one per model request of the turn; main loop only)
@@ -34,7 +34,8 @@ All of it lives in one hooks module, [`hooks/register.ts`](../hooks/register.ts)
 | `models.ts` | Alias resolution, effort support per model, windows, rank, cache behaviour of effort changes |
 | `overrides.ts` | `+target` prefixes, `/clef` commands, go-ahead detection, native `/effort` tracking |
 | `guard.ts` | Daily neuron budget, quota pause, circuit breaker |
-| `config.ts` · `env.ts` | Plugin options and the advanced file → `Config`; environment → model and cache facts |
+| `pricing.ts` | List prices; what a turn, a switch and a held turn cost, per billing mode |
+| `config.ts` · `env.ts` | Plugin options and the advanced file → `Config`; environment and rate limits → model, billing and cache facts |
 | `log.ts` · `format.ts` · `redact.ts` | Local log records and stats, everything shown, secret redaction |
 
 ## What was verified, and how
@@ -68,9 +69,13 @@ Everything below was checked against current documentation (October 2026) and, w
   - Opus 5.5 high → low through the mod's rewrite: 42.5k read, 0.1k written. The cache was kept.
   - A model switch: only the shared ~8–10k system prefix was read.
   - Haiku routed from an Opus session cached normally across turns.
-  - **Sonnet 5.5 never read the conversation from cache across turns, even in plain Claude Code with the router bypassed and the effort unchanged.** Each turn re-wrote it (~24–33k). The cause is unknown and may be specific to `-p`. The log records cache read and write per turn, so real sessions will show whether it holds interactively. If it does, routing long conversations to Sonnet costs more than the cache-hold rule assumes.
+  - **Sonnet 5.5 never read the conversation from cache across turns, even in plain Claude Code with the router bypassed and the effort unchanged.** Each turn re-wrote it (~24–33k). The cause is unknown and may be specific to `-p`. In interactive sessions since, Sonnet 5.5 read its conversation cache across turns normally, so the anomaly looks specific to `-p`.
 - The TTL is one hour on a subscription within plan usage, and five minutes with an API key or a cloud provider. It can be overridden by `CLAUDE_CODE_PROMPT_CACHE_TTL`, the `promptCacheTtl` setting and related variables. The mod resolves it the same way.
 - The system-prompt prefix is shared across sessions per model. In a new session, a request on Haiku read about 17k tokens from cache.
+- Cache reads cost 0.1× the input price, except on Opus 5.5 (0.05×, $0.20/MTok, the same as Sonnet 5.5) and Fable 5.1 (0.025×) ([pricing](https://platform.claude.com/docs/en/about-claude/pricing)).
+- The API looks for an earlier cache entry only within 20 content blocks of a request's breakpoint ([prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)). Returning to a model after a detour of several tool calls therefore usually rewrites the conversation.
+- `$.session.usage().rateLimits` carries the plan's `five_hour` and `seven_day` windows on a subscription, and is empty otherwise (or a gateway's `spend_limit`). The mod uses it to detect billing.
+- A compaction (`session.compact`) replaces the conversation, so the next request writes a new cache on any model.
 
 **Clef on Workers AI** ([blog](https://blog.cloudflare.com/clef-decision-models/), [clef-flash](https://developers.cloudflare.com/workers-ai/models/clef-flash/), [clef](https://developers.cloudflare.com/workers-ai/models/clef/), [pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/), [errors](https://developers.cloudflare.com/workers-ai/platform/errors/), [limits](https://developers.cloudflare.com/workers-ai/platform/limits/))
 
@@ -114,15 +119,9 @@ Everything below was checked against current documentation (October 2026) and, w
 5. Clef → profile. If Clef fails, the fallback profile, never below the last route.
 6. The person's `/effort` sets the effort of a Clef, continuation or fallback route.
 
-Then, always: unavailable models, the context window, the cache hold (for routes the router chose itself) and the effort cap and clamp.
+Then, always: unavailable models, the context window, downgrade timing (for routes the router chose itself) and the effort cap and clamp.
 
-**Cache hold.** A downgrade (to a cheaper model family) is held on the current model when:
-
-- the cache is warm (younger than the TTL),
-- the context is at least `cache_hold_min_tokens` (default 40k; Claude Code's own prompt is about 20k of that),
-- and the current model is usable.
-
-On a hold, the effort comes from the recommended profile when an effort change keeps the cache on that model, and otherwise stays as cached. The rule is a threshold rather than a price calculation. Prices change and differ by plan, and a threshold is inspectable and easy to tune. The arithmetic behind it, at Anthropic API list prices in October 2026: re-reading cached context on Opus 5.5 costs $0.20 per million tokens, while writing it fresh into Haiku 4.5's cache costs $1.25 per million (1.25 × $1). Moving a warm 100k-token conversation from Opus to Haiku therefore costs about 6× more input on that turn, before counting the trip back. Upgrades are never held: quality first.
+**Downgrade timing.** A downgrade off a warm cache is held while what staying has cost, summed over the held turns of the stretch, is less than what the switch costs now (the context written to the new model's cache, times `downgrade_patience`). Then it is taken. What staying costs depends on billing. With an API key, it is the dollar difference between the two models for the held turn's tokens. On a subscription, it is the whole held turn, drawn from the stronger model's allowance. A held turn gets the effort Clef's level asked for wherever an effort change keeps the cache. A compaction, `/clear`, an expired cache, or no caching at all makes the switch free. Upgrades are never held: quality first. The reasoning, and the threshold rule it replaced, are in [Routing, prompt caching and cost](COSTS.md) and [ADR 0001](adr/0001-downgrade-timing-by-billing-mode.md).
 
 **Failure is boring.** Every failure path ends in either "leave the request alone" or "use the fallback profile":
 
@@ -149,8 +148,8 @@ A dead endpoint costs one timeout, not one per prompt.
 | Project | Adopted | Left out, and why |
 | --- | --- | --- |
 | [satviksinha/jev-model-router](https://github.com/satviksinha/jev-model-router) | `turn.start` decides, `turn.step` rewrites; one decision per turn; subagents unrouted; full history in a command; "fail open looks like not loaded, so show state" | Route line written into the model's reply text (pollutes the transcript); `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS` (obsolete) |
-| [Flam1ngFir3ball/jev-claude-router](https://github.com/Flam1ngFir3ball/jev-claude-router) | Cache-aware holds; go-ahead and task-notification turns continue the last route; context-window guard; effort ceiling; "what actually answered" from usage; feedback on why a route was held | Dollar-priced switch model (prices drift, a threshold is inspectable); natural-language override parsing ("use opus", with negation rules: a strict `+target` prefix is predictable); compaction by the decision model (out of scope); text summaries injected into replies |
-| [lucasamonrc/pi-auto-router](https://github.com/lucasamonrc/pi-auto-router) | Clef request shape and `noul` handling; tiers as a ladder; "stay on the model unless the task changed" (here: follow-up floor and cache hold); `/route test` for tuning | Task-kind taxonomy with per-kind model strengths (a multi-provider catalog problem this project does not have); wrangler OAuth token discovery (shelling out; a scoped API token in secure storage is simpler) |
+| [Flam1ngFir3ball/jev-claude-router](https://github.com/Flam1ngFir3ball/jev-claude-router) | Cache-aware holds, priced against staying; go-ahead and task-notification turns continue the last route; context-window guard; effort ceiling; "what actually answered" from usage; feedback on why a route was held | A one-turn horizon: priced turn by turn, a downgrade is never worth it, so a long routine stretch never leaves the strong model (here the stretch is priced; see ADR 0001); natural-language override parsing ("use opus", with negation rules: a strict `+target` prefix is predictable); compaction by the decision model (out of scope); text summaries injected into replies |
+| [lucasamonrc/pi-auto-router](https://github.com/lucasamonrc/pi-auto-router) | Clef request shape and `noul` handling; tiers as a ladder; "stay on the model unless the task changed" (here: follow-up floor and downgrade timing); `/route test` for tuning | Task-kind taxonomy with per-kind model strengths (a multi-provider catalog problem this project does not have); wrangler OAuth token discovery (shelling out; a scoped API token in secure storage is simpler) |
 | [Gjusev/clef-router](https://github.com/Gjusev/clef-router) | Escalate on low confidence; parse failures never route cheap; error taxonomy (auth / rate / server / response); calibration with committed fixtures and separate "what we measured" from "what Cloudflare measured" | OpenAI-compatible proxy, Python service, retries with backoff in the interactive path |
 | [nobodyohm-web/claude-code-model-router](https://github.com/nobodyohm-web/claude-code-model-router) | Named postures/profiles users can retarget; local JSONL ledger and a stats command; honest labelling of estimates | Regex classification with hints injected for the main model to delegate; pinned subagents as the switching mechanism (a mod can rewrite the request directly) |
 | Morph router | Effort as a first-class routed dimension; difficulty plus ambiguity as signals (ambiguity here is part of the rubric's "hard" level) | A local proxy in front of the Anthropic API; a multi-provider catalog |

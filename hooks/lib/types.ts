@@ -109,6 +109,28 @@ export type Adjustment = {
   reason: string
 }
 
+/**
+ * A downgrade weighed against a warm prompt cache: Clef's level asked for a
+ * cheaper model (or, where an effort change breaks the cache, a lower effort)
+ * than the one whose cache is warm. Held until staying has cost what the
+ * switch costs, then taken.
+ */
+export type Deferral = {
+  /** The cheaper route Clef's level maps to. */
+  wanted: Route
+  /** The model whose cache is warm. */
+  from: string
+  billing: "subscription" | "api"
+  /** List-price dollars staying has cost over the earlier held turns of this stretch. */
+  spent: number
+  /** List-price dollars the switch costs now: the context written to the new cache. */
+  cost: number
+  /** Held turns in this stretch, this one included when it is held. */
+  turns: number
+  /** True: this turn stays on `from`. False: the stretch ends, the turn switches. */
+  held: boolean
+}
+
 export type Decision = {
   turnId: string
   kind: TurnKind
@@ -122,4 +144,8 @@ export type Decision = {
   adjustments: Adjustment[]
   /** A human-readable reason when nothing is routed, or for a fallback. */
   note?: string
+  /** How the person pays, as the policy saw it this turn. */
+  billing?: "subscription" | "api"
+  /** Present when a downgrade was weighed against a warm cache. */
+  deferral?: Deferral
 }

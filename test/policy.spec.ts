@@ -235,20 +235,30 @@ describe("availability and context window", () => {
   })
 })
 
-describe("cache-aware hold", () => {
+describe("downgrade timing off a warm cache", () => {
   const warmOpus = { model: "claude-opus-5-5", effort: "high" as const, at: 1_000_000 - 30_000, promptTokens: 120_000 }
+  // 120k written to Sonnet 5.5's cache at the 5-minute rate ($2.50/MTok): $0.30.
+  const toSonnet = 0.3
 
-  test("a downgrade with a large warm cache keeps the model, applying the new effort when that is free", () => {
-    const d = decide(input({ result: ok(rec("trivial")), session: session({ cache: warmOpus }) }))
-    assert.equal(d.recommendation?.level, "trivial")
+  test("the first downgrade off a warm cache is held: staying has cost nothing yet", () => {
+    const d = decide(input({ result: ok(rec("simple")), session: session({ cache: warmOpus }) }))
+    assert.equal(d.recommendation?.level, "simple")
     assert.equal(d.final?.model, "claude-opus-5-5")
-    // Haiku had no effort, so the cached effort stays.
-    assert.equal(d.final?.effort, "high")
     assert.equal(d.adjustments[0]?.rule, "cache-hold")
+    assert.equal(d.deferral?.held, true)
+    assert.equal(d.deferral?.turns, 1)
+    assert.equal(d.deferral?.wanted.model, "claude-sonnet-5-5")
+    assert.ok(Math.abs(d.deferral!.cost - toSonnet) < 1e-9)
   })
 
   test("held on Opus 5.5, the recommended profile's effort applies (effort changes keep the cache)", () => {
     const d = decide(input({ result: ok(rec("simple")), session: session({ cache: warmOpus }) }))
+    assert.equal(d.final?.effort, "low")
+  })
+
+  test("a level whose model takes no effort (Haiku) is held at the lowest effort, not the cached one", () => {
+    const deep = { ...warmOpus, effort: "xhigh" as const }
+    const d = decide(input({ result: ok(rec("trivial")), session: session({ cache: deep }) }))
     assert.equal(d.final?.model, "claude-opus-5-5")
     assert.equal(d.final?.effort, "low")
   })
@@ -260,15 +270,77 @@ describe("cache-aware hold", () => {
     assert.equal(d.final?.effort, "high")
   })
 
+  test("the downgrade is taken once staying has cost what the switch costs", () => {
+    const wanted = { level: "simple" as const, model: "claude-sonnet-5-5", effort: "low" as const }
+    const under = decide(input({ result: ok(rec("simple")), session: session({ cache: warmOpus, hold: { model: "claude-opus-5-5", wanted, spent: 0.29, turns: 2 } }) }))
+    assert.equal(under.final?.model, "claude-opus-5-5")
+    assert.equal(under.deferral?.turns, 3)
+    assert.equal(under.deferral?.spent, 0.29)
+    const over = decide(input({ result: ok(rec("simple")), session: session({ cache: warmOpus, hold: { model: "claude-opus-5-5", wanted, spent: 0.31, turns: 3 } }) }))
+    assert.equal(over.final?.model, "claude-sonnet-5-5")
+    assert.equal(over.final?.effort, "low")
+    assert.deepEqual(over.adjustments, [])
+    assert.equal(over.deferral?.held, false)
+    assert.equal(over.deferral?.turns, 3)
+  })
+
+  test("downgrade_patience scales what staying must cost first", () => {
+    const wanted = { level: "simple" as const, model: "claude-sonnet-5-5", effort: "low" as const }
+    const hold = { model: "claude-opus-5-5", wanted, spent: 0.31, turns: 3 }
+    const d = decide(input({ config: config({ downgrade_patience: 2 }), result: ok(rec("simple")), session: session({ cache: warmOpus, hold }) }))
+    assert.equal(d.final?.model, "claude-opus-5-5")
+  })
+
+  test("downgrade_patience = 0 takes every downgrade at once", () => {
+    const d = decide(input({ config: config({ downgrade_patience: 0 }), result: ok(rec("trivial")), session: session({ cache: warmOpus }) }))
+    assert.equal(d.final?.model, "claude-haiku-4-5")
+    assert.equal(d.deferral, undefined)
+  })
+
+  test("what a switch costs follows the context now, and the cache TTL's write price", () => {
+    const d = decide(input({ result: ok(rec("simple")), session: session({ cache: warmOpus }), contextTokens: 200_000, cacheTtlMs: 60 * 60_000 }))
+    // 200k at Sonnet 5.5's one-hour write price ($4/MTok).
+    assert.ok(Math.abs(d.deferral!.cost - 0.8) < 1e-9)
+  })
+
+  test("what was spent holding another model does not carry over", () => {
+    const wanted = { model: "claude-haiku-4-5" }
+    const d = decide(input({ result: ok(rec("trivial")), session: session({ cache: warmOpus, hold: { model: "claude-sonnet-5-5", wanted, spent: 5, turns: 4 } }) }))
+    assert.equal(d.final?.model, "claude-opus-5-5")
+    assert.equal(d.deferral?.turns, 1)
+  })
+
+  test("a continuation of a held turn weighs the deferred downgrade again", () => {
+    const wanted = { level: "simple" as const, model: "claude-sonnet-5-5", effort: "low" as const }
+    const last = { level: "simple" as const, model: "claude-opus-5-5", effort: "low" as const }
+    const stay = decide(input({ kind: "go-ahead", session: session({ cache: warmOpus, last, hold: { model: "claude-opus-5-5", wanted, spent: 0.1, turns: 1 } }) }))
+    assert.equal(stay.source, "continuation")
+    assert.equal(stay.final?.model, "claude-opus-5-5")
+    assert.equal(stay.deferral?.turns, 2)
+    const go = decide(input({ kind: "go-ahead", session: session({ cache: warmOpus, last, hold: { model: "claude-opus-5-5", wanted, spent: 0.5, turns: 2 } }) }))
+    assert.equal(go.final?.model, "claude-sonnet-5-5")
+  })
+
+  test("a lower effort that would break the cache is weighed the same way", () => {
+    const old = { ...warmOpus, model: "claude-opus-4-8" }
+    const wanted = { level: "hard" as const, model: "claude-opus-4-8", effort: "medium" as const }
+    const profiles = { profile_hard: "claude-opus-4-8:medium" }
+    const held = decide(input({ config: config(profiles), result: ok(rec("hard")), session: session({ cache: old }) }))
+    assert.equal(held.final?.effort, "high")
+    assert.equal(held.deferral?.wanted.effort, "medium")
+    // 120k rewritten on Opus 4.8 at $6.25/MTok: $0.75.
+    const taken = decide(input({ config: config(profiles), result: ok(rec("hard")), session: session({ cache: old, hold: { model: "claude-opus-4-8", wanted, spent: 0.8, turns: 2 } }) }))
+    assert.equal(taken.final?.effort, "medium")
+  })
+
   test("a cold cache does not hold", () => {
     const cold = { ...warmOpus, at: 1_000_000 - 10 * 60_000 }
     const d = decide(input({ result: ok(rec("trivial")), session: session({ cache: cold }) }))
     assert.equal(d.final?.model, "claude-haiku-4-5")
   })
 
-  test("a small context does not hold", () => {
-    const small = { ...warmOpus, promptTokens: 20_000 }
-    const d = decide(input({ result: ok(rec("trivial")), session: session({ cache: small }) }))
+  test("nothing is held where nothing is cached (a gateway that strips cache markers)", () => {
+    const d = decide(input({ result: ok(rec("trivial")), session: session({ cache: { ...warmOpus, caching: false } }) }))
     assert.equal(d.final?.model, "claude-haiku-4-5")
   })
 
@@ -279,14 +351,14 @@ describe("cache-aware hold", () => {
     assert.equal(d.final?.effort, "xhigh")
   })
 
-  test("cache_hold_min_tokens = 0 disables holding", () => {
-    const d = decide(input({ config: config({ cache_hold_min_tokens: 0 }), result: ok(rec("trivial")), session: session({ cache: warmOpus }) }))
-    assert.equal(d.final?.model, "claude-haiku-4-5")
-  })
-
   test("explicit choices are never held", () => {
     const d = decide(input({ override: { level: "trivial" }, session: session({ cache: warmOpus }) }))
     assert.equal(d.final?.model, "claude-haiku-4-5")
+  })
+
+  test("the decision records the billing it was made for", () => {
+    const d = decide(input({ billing: "api", result: ok(rec("hard")) }))
+    assert.equal(d.billing, "api")
   })
 })
 

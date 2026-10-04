@@ -21,6 +21,8 @@ High-capability models and high effort are worth it for difficult debugging, arc
 
 The goal is not "always the cheapest model". It is **the least expensive configuration that is sufficiently capable**, with every policy decision shown to you.
 
+It is no silver bullet. In a long session most of the cost is the conversation being re-read on every request, whatever model reads it, and moving a warm conversation to another model has a cost of its own. `/clear` between tasks often saves more than any routing. [Routing, prompt caching and cost](docs/COSTS.md) explains what a router can and cannot save, depending on how you pay.
+
 ## Requirements
 
 - Claude Code **2.1.287 or later** (mods are on by default from that version). Check with `claude --version`.
@@ -115,7 +117,7 @@ On the same **Use REST API** panel, under **Get Account ID**, copy the **Account
 
 ## What you see
 
-- **Under the prompt**, dimmed at the end of the hint line, the current route: `↳ Clef → Sonnet · medium · 87%` (terminal; on other surfaces set `announce` to `answer`). The percentage is the probability Clef gave the level it picked. When policy changed Clef's pick, the reason follows in brackets, for example `(held for cache)` or `(unsure)`. When Clef could not answer: `Clef ✕ timeout → Sonnet · medium`.
+- **Under the prompt**, dimmed at the end of the hint line, the current route: `↳ Clef → Sonnet · medium · 87%` (terminal; on other surfaces set `announce` to `answer`). The percentage is the probability Clef gave the level it picked. When policy changed Clef's pick, the reason follows in brackets, for example `(Sonnet deferred)` or `(unsure)`. When Clef could not answer: `Clef ✕ timeout → Sonnet · medium`.
 - **`/clef`** shows the full picture: mode, the last decision with Clef's full probability distribution, latency, every policy adjustment and why, today's Clef usage, and the cache state.
 
 ```
@@ -134,7 +136,7 @@ Last turn
 | --- | --- |
 | `/clef` | Status and the last decision |
 | `/clef history` | This session's turns: latency, route, confidence, source, and any policy change |
-| `/clef stats [days]` | Totals from the local log: by model, effort, profile, source; latency; fallbacks; overrides; cache holds; your feedback |
+| `/clef stats [days]` | Totals from the local log: by model, effort, profile, source; latency; fallbacks; overrides; turns held on a warm model and downgrades taken; your feedback |
 | `/clef test <prompt>` | Ask Clef about a prompt without sending it to Claude |
 | `/clef profiles` | What each difficulty level runs on here |
 | `/clef pin <target>` | Use one target for the rest of the session (`/clef pin opus:high`, `/clef pin hard`, `/clef pin :low`) |
@@ -157,7 +159,7 @@ prompt ──► turn.start ──► Clef-flash: difficulty 0-4 (+ "is this a f
                   │
                   ▼
            policy (deterministic): overrides → continuation → confidence → follow-up floor
-                                   → availability → context window → cache hold → effort clamp
+                                   → availability → context window → downgrade timing → effort clamp
                   │
                   ▼
            turn.step ×N: every main-loop request of the turn sent with that model + effort
@@ -176,7 +178,7 @@ prompt ──► turn.start ──► Clef-flash: difficulty 0-4 (+ "is this a f
   | deep | `opus:xhigh` | open-ended investigation and design |
 
   Haiku 4.5 takes no effort setting, so the trivial level sends none.
-- **Cache-aware.** Each model has its own prompt cache. Moving a long, warm conversation to a cheaper model re-reads all of it uncached, which can cost more than it saves. On a downgrade where at least 40k tokens are cached and the cache is still warm, the mod keeps the current model and changes only the effort. Anthropic documents that changing effort keeps the cache on Opus 5.5, Sonnet 5.5 and Fable 5.1; for Opus 5.5 this was confirmed live through the mod. Upgrades are never held back.
+- **Cache-aware, by billing.** Each model has its own prompt cache, so moving a warm conversation to a cheaper model writes all of it again. A downgrade is held on the warm model until staying has cost what the switch costs, then taken: a one-off easy question stays put, and a stretch of routine work moves. With an API key, "cost" is dollars. Opus 5.5 and Sonnet 5.5 cost the same to re-read, so the mod mostly stays and lowers the effort. On a subscription it is plan usage, and the mod moves after a few turns to save the stronger model's allowance. Billing is detected, or set with `billing`. A held turn still gets the effort Clef asked for, which keeps the cache on Opus 5.5, Sonnet 5.5 and Fable 5.1. Upgrades are never held back. See [ADR 0001](docs/adr/0001-downgrade-timing-by-billing-mode.md).
 - **Low confidence** (Clef gives its pick less than 55%): by default the mod takes the more capable of Clef's two likeliest levels. The threshold and policy are configurable, and every change is logged.
 - **Latency.** Clef-flash's model time is about 40 ms (Cloudflare's figure), but a routed prompt waits for the whole round trip: 340–530 ms in the first live tests. Go-aheads, overrides and pinned sessions skip the call.
 - **You stay in control.** `+target` beats `/clef pin`, which beats Clef. A `/model` change mid-session pauses routing until `/clef auto`. An `/effort` change sets the effort while Clef keeps choosing the model. Subagents keep their own models.
@@ -202,11 +204,13 @@ Everything else stays on your machine. The local log keeps a hash and the length
 
 ## Configuration
 
-Everyday options are plugin options. Set them with `/plugin configure` or in `/config`: the Cloudflare account ID and token, the decision model (`clef-flash` or `clef`), the profiles, how to show the route, routing on or off, and whether to log prompt text. Tuning knobs go in an optional `~/.claude/clef-model-router.json`. Thresholds, policies, timeout, budget, cache hold and the rubric are all set there. The full reference, including precedence rules, is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+Everyday options are plugin options. Set them with `/plugin configure` or in `/config`: the Cloudflare account ID and token, the decision model (`clef-flash` or `clef`), the profiles, your billing (detected by default), how to show the route, routing on or off, and whether to log prompt text. Tuning knobs go in an optional `~/.claude/clef-model-router.json`. Thresholds, policies, timeout, budget, downgrade patience and the rubric are all set there. The full reference, including precedence rules, is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md): lifecycle, policy pipeline, what was verified, design decisions, what was borrowed from earlier routers and what was left out
+- [Routing, prompt caching and cost](docs/COSTS.md): the problem this solves, what it cannot do, and how billing changes the answer
+- [Decision records](docs/adr/README.md)
 - [Configuration](docs/CONFIGURATION.md): every option, precedence, environment variables
 - [Privacy and security](docs/PRIVACY.md): what leaves your machine, logs, credentials, Cloudflare's policies
 - [Calibration](docs/CALIBRATION.md): the rubric, the prompt corpus, `npm run calibrate`, judging whether Clef was right
