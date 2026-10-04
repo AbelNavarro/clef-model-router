@@ -23,7 +23,8 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npm run types
+      # Engine-independent code only; the hooks module is checked by the mod job
+      # against the latest Claude Code (the published declarations lag it).
       - run: npm run typecheck
       - run: npm test
       - name: Calibration pipeline (mock answers, no network)

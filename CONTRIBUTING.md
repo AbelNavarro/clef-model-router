@@ -7,13 +7,14 @@ Thanks for helping. This project is deliberately small: a Claude Code mod that r
 ```sh
 git clone https://github.com/AbelNavarro/clef-claude-router && cd clef-claude-router
 npm install
-npm run types        # fetch Claude Code's published mod API declarations into .types/
-npm run check        # typecheck, unit tests, claude plugin validate, claude plugin test
+claude --plugin-dir .   # once: Claude Code lays its mod API declarations in .claude-plugin/types/
+npm run types        # copy them to .types/ (falls back to the published, older copy)
+npm run check        # typecheck (lib + mod), unit tests, claude plugin validate, claude plugin test
 ```
 
 You need Node 22.18 or later, which runs TypeScript directly, and Claude Code 2.1.287 or later for `validate` and `test:mod`.
 
-To try your working copy in a session, run `claude --plugin-dir .`. Saving a file reloads the mod when the current turn ends. To type-check against the exact Claude Code build you run, copy `.claude-plugin/types/claude-code/index.d.ts` (laid by the engine once it has loaded the mod) over `.types/claude-code.d.ts`.
+To try your working copy in a session, run `claude --plugin-dir .`. Saving a file reloads the mod when the current turn ends. CI type-checks the engine-independent code with `npm run typecheck`. The hooks module and engine tests are type-checked locally with `npm run typecheck:mod`, against your build's declarations. In CI they are exercised by `claude plugin validate` and `claude plugin test` on the latest Claude Code, because Anthropic's published declarations lag the current build.
 
 ## Layout
 

@@ -12,11 +12,12 @@
     "test": "node --test 'test/**/*.spec.ts'",
     "test:mod": "claude plugin test .",
     "types": "node scripts/fetch-types.ts",
-    "typecheck": "tsc -p . && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.node.json",
     "validate": "claude plugin validate .",
-    "check": "npm run typecheck && npm test && npm run validate && npm run test:mod",
+    "check": "npm run typecheck && npm run typecheck:mod && npm test && npm run validate && npm run test:mod",
     "calibrate": "node scripts/calibrate.ts",
-    "smoke": "node scripts/smoke.ts"
+    "smoke": "node scripts/smoke.ts",
+    "typecheck:mod": "tsc -p ."
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
