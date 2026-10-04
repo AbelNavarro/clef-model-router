@@ -74,7 +74,7 @@ Mods run with your permissions. `claude plugin validate .` lists everything this
 
 - **Network:** `$.http.fetch`, to the Clef endpoint only.
 - **Files:** `$.fs.read` of the advanced file, the rubric file and its own logs; `$.fs.write` and `$.fs.list` of its log directory.
-- **Engine:** `$.env.get` of the variables listed in [Configuration](CONFIGURATION.md#environment-variables), plus `HOME`, `USERPROFILE` and `CLAUDE_CONFIG_DIR` to locate files. It also reads settings (only `promptCacheTtl` is used), the session's model, id and usage, its own state and store, the clock, the status line, toasts, and the `/clef` command.
+- **Engine:** `$.env.get` of the variables listed in [Configuration](CONFIGURATION.md#environment-variables), plus `HOME`, `USERPROFILE` and `CLAUDE_CONFIG_DIR` to locate files. It also reads settings (only `promptCacheTtl` is used), the session's model, id and usage, its own state and store, the clock, the prompt hint line (to show the route), toasts, and the `/clef` command.
 
 It runs no processes, approves no tool calls, and does not rewrite your prompt other than removing a `+target` prefix you typed. Apart from removing that prefix, it never changes what Claude reads. The only change to a request is its model and effort.
 
